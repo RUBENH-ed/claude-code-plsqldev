@@ -1,0 +1,28 @@
+# Compila la DLL en GitHub (no hace falta instalar nada en tu equipo).
+# Sube el proyecto a un repositorio, ve a Actions > build > Run workflow y descarga el artefacto.
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publicar DLL nativa
+        run: dotnet publish src/ClaudeCodePlsql.csproj -c Release -r win-${{ matrix.arch }} -o dist/${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeCodePlsql-${{ matrix.arch }}
+          path: dist/${{ matrix.arch }}/ClaudeCodePlsql.dll

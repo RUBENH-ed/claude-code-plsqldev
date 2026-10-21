@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Plug-in de PL/SQL Developer compilado como DLL nativa con .NET NativeAOT.
+    No necesita .NET instalado en el equipo donde se usa: la DLL lleva el runtime dentro.
+
+    Compilar (en Windows, con el SDK de .NET 10 y las herramientas de C++ de Visual Studio):
+      dotnet publish -c Release -r win-x64 -o ..\dist\x64     (PL/SQL Developer de 64 bits)
+      dotnet publish -c Release -r win-x86 -o ..\dist\x86     (PL/SQL Developer de 32 bits)
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>ClaudeCodePlsql</AssemblyName>
+    <RootNamespace>ClaudeCodePlsql</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- DLL nativa con funciones exportadas (UnmanagedCallersOnly) -->
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <SelfContained>true</SelfContained>
+
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+    <StripSymbols>true</StripSymbols>
+    <OptimizationPreference>Size</OptimizationPreference>
+
+    <Version>1.1.0</Version>
+    <Product>Claude Code para PL/SQL Developer</Product>
+  </PropertyGroup>
+
+</Project>
