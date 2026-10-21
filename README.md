@@ -1,8 +1,9 @@
 # Claude Code para PL/SQL Developer
 
-> **Versión 1.1 (EDISA).** Abre Claude en la carpeta del expediente (`1234567 - Título`) cuando el fichero de la
-> ventana está dentro de una, trae las normas de EDISA en el `CLAUDE.md` y no carga en el editor texto con
-> caracteres que no existen en Windows-1252. Detalle en [CAMBIOS.md](CAMBIOS.md).
+> **Versión 1.2 (EDISA).** Abre Claude en la carpeta del expediente (`1234567 - Título`) cuando el fichero de la
+> ventana está dentro de una, en una sola ventana por expediente colocada como panel a la derecha de PL/SQL
+> Developer y retomando la conversación de ese proyecto. Trae las normas de EDISA en el `CLAUDE.md` y no carga en
+> el editor texto con caracteres que no existen en Windows-1252. Detalle en [CAMBIOS.md](CAMBIOS.md).
 
 Plug-in nativo (DLL) para **PL/SQL Developer** de Allround Automations que conecta el editor con
 **Claude Code**, de forma parecida a la integración de Visual Studio Code:
@@ -92,6 +93,9 @@ La primera vez se crea `%APPDATA%\ClaudeCodePlsql\ClaudeCode.ini` con la configu
 | `CarpetaTrabajo` | `%USERPROFILE%\ClaudePLSQL` | Carpeta general, para las ventanas que no son de un expediente. Puede ser tu repositorio Git. |
 | `ModoExpedientes` | `si` | `si`: abre Claude en la carpeta del expediente; `no`: siempre en la general. |
 | `SoloWindows1252` | `si` | `si`: no carga en el editor texto con caracteres que no existen en Windows-1252. |
+| `RetomarConversacion` | `si` | `si`: abre Claude con `--continue`, retomando la última conversación de esa carpeta (si no hay, empieza una). |
+| `PanelLateral` | `si` | `si`: una sola ventana de Claude por carpeta, a la derecha de PL/SQL Developer; si ya está abierta, la trae al frente y deja en el portapapeles la referencia para pegarla. |
+| `AnchoPanel` | `35` | Ancho del panel de Claude en % de la pantalla (20-60). |
 | `Terminal` | `auto` | `auto`, `wt` (Windows Terminal) o `consola` (PowerShell normal). |
 | `Shell` | `powershell.exe` | O `pwsh.exe` si usas PowerShell 7. |
 | `ComandoClaude` | `claude` | Ruta completa a `claude.exe` si no está en el PATH. |

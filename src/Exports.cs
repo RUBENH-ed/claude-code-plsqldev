@@ -15,10 +15,11 @@ public static unsafe class Exports
     private const string Description = "Claude Code para PL/SQL Developer";
 
     private const string AboutText =
-        "Claude Code para PL/SQL Developer 1.1 (EDISA)\r\n\r\n" +
+        "Claude Code para PL/SQL Developer 1.2 (EDISA)\r\n\r\n" +
         "Pasa el codigo de la ventana activa a Claude Code, abre una sesion en la terminal " +
         "y carga en el editor los cambios que haga Claude.\r\n\r\n" +
-        "Si el fichero esta en una carpeta de expediente (1234567 - Titulo), Claude se abre en ella.\r\n\r\n" +
+        "Si el fichero esta en una carpeta de expediente (1234567 - Titulo), Claude se abre en ella.\r\n" +
+        "Una ventana de Claude por carpeta, como panel a la derecha, que retoma la conversacion del proyecto.\r\n\r\n" +
         "Configuracion: %APPDATA%\\ClaudeCodePlsql\\ClaudeCode.ini";
 
     // Las cadenas que se devuelven al IDE deben seguir vivas después de la llamada: se reservan una vez y no se liberan.

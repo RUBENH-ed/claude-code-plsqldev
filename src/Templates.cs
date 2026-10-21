@@ -23,6 +23,17 @@ ModoExpedientes=si
 ;      como ≤ o ✓, emojis...), porque se perderían al guardar o compilar. Te dice cuáles son y en qué línea.
 SoloWindows1252=si
 
+; si = al abrir Claude retoma la última conversación de esa carpeta (cada expediente tiene la suya); no = empieza una nueva
+RetomarConversacion=si
+
+; si = una sola ventana de Claude por carpeta, colocada como panel a la derecha de PL/SQL Developer. Si ya está
+;      abierta, la trae al frente y te deja en el portapapeles la referencia de la ventana para pegarla (Ctrl+V).
+; no = cada vez abre una ventana nueva, donde la coloque Windows.
+PanelLateral=si
+
+; Ancho del panel de Claude, en % de la pantalla (20 a 60)
+AnchoPanel=35
+
 ; auto = Windows Terminal si está instalado; wt = siempre Windows Terminal; consola = ventana de PowerShell normal
 Terminal=auto
 

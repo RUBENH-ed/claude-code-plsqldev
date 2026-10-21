@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -105,5 +106,126 @@ internal static unsafe partial class Win32
         {
             CloseClipboard();
         }
+    }
+
+    // ---------------------------------------------------------------- ventana de Claude junto a PL/SQL Developer
+
+    private const int SW_RESTORE = 9;
+    private const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool EnumWindows(nint proc, nint lParam);
+
+    [LibraryImport("user32.dll")]
+    private static partial int GetWindowTextLengthW(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial int GetWindowTextW(nint hWnd, char* text, int max);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsIconic(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsZoomed(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool ShowWindow(nint hWnd, int cmd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowPos(nint hWnd, nint after, int x, int y, int cx, int cy, uint flags);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint MonitorFromWindow(nint hWnd, uint flags);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetMonitorInfo(nint monitor, MONITORINFO* info);
+
+    private static string _findText = "";
+    private static nint _found;
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    private static int EnumProc(nint hWnd, nint lParam)
+    {
+        try
+        {
+            if (!IsWindowVisible(hWnd)) return 1;
+            uint pid = 0;
+            GetWindowThreadProcessId(hWnd, &pid);
+            if (pid == (uint)Environment.ProcessId) return 1; // las ventanas de PL/SQL Developer no cuentan
+            int len = GetWindowTextLengthW(hWnd);
+            if (len <= 0 || len > 1000) return 1;
+            char* buf = stackalloc char[len + 1];
+            int n = GetWindowTextW(hWnd, buf, len + 1);
+            if (new string(buf, 0, n).Contains(_findText, StringComparison.OrdinalIgnoreCase))
+            {
+                _found = hWnd;
+                return 0;
+            }
+        }
+        catch
+        {
+            // nunca dejar escapar una excepción a Windows
+        }
+        return 1;
+    }
+
+    /// <summary>Ventana visible de otro programa cuyo título contiene el texto, o 0.</summary>
+    public static nint FindTopWindow(string titlePart)
+    {
+        _findText = titlePart;
+        _found = 0;
+        EnumWindows((nint)(delegate* unmanaged[Stdcall]<nint, nint, int>)&EnumProc, 0);
+        return _found;
+    }
+
+    /// <summary>Restaura la ventana si está minimizada y la pone delante.</summary>
+    public static bool BringToFront(nint hWnd)
+    {
+        if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
+        return SetForegroundWindow(hWnd);
+    }
+
+    /// <summary>
+    /// Coloca la ventana de Claude como panel a la derecha de la pantalla de PL/SQL Developer (el porcentaje del
+    /// ancho indicado) y PL/SQL Developer en el resto.
+    /// </summary>
+    public static void PlaceSide(nint claude, int percent)
+    {
+        nint ide = Ide.MainWindow;
+        if (claude == 0 || ide == 0) return;
+
+        MONITORINFO mi = default;
+        mi.cbSize = sizeof(MONITORINFO);
+        if (!GetMonitorInfo(MonitorFromWindow(ide, MONITOR_DEFAULTTONEAREST), &mi)) return;
+
+        RECT w = mi.rcWork;
+        int width = w.Right - w.Left, height = w.Bottom - w.Top;
+        int side = width * Math.Clamp(percent, 20, 60) / 100;
+
+        if (IsZoomed(ide)) ShowWindow(ide, SW_RESTORE);
+        if (IsZoomed(claude) || IsIconic(claude)) ShowWindow(claude, SW_RESTORE);
+        SetWindowPos(ide, 0, w.Left, w.Top, width - side, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(claude, 0, w.Right - side, w.Top, side, height, SWP_NOZORDER);
     }
 }

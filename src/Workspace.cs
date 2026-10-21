@@ -117,6 +117,24 @@ internal static class Prompts
         return sb.ToString();
     }
 
+    /// <summary>Texto para pegar en una ventana de Claude que ya estaba abierta.</summary>
+    public static string Again(string title, string copy, string connection, (string Path, int Line)? selection)
+    {
+        string at = "@" + copy.Replace('\\', '/');
+        var sb = new StringBuilder($"Sigo en PL/SQL Developer con la ventana {title}{connection}. Su copia está en {at} (actualizada ahora)");
+        if (selection is { } s)
+        {
+            sb.Append($" y el fragmento que tengo seleccionado, en @{s.Path.Replace('\\', '/')}");
+            if (s.Line > 0) sb.Append($" (el cursor está en la línea {s.Line})");
+            sb.Append(". Léelos y espera mi pregunta sobre ese fragmento. ");
+        }
+        else
+        {
+            sb.Append(". Léela y espera mis instrucciones. ");
+        }
+        return sb.ToString();
+    }
+
     private static StringBuilder Start(Workspace ws, string title, string connection)
     {
         var sb = new StringBuilder(Marker);

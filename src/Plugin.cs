@@ -33,6 +33,10 @@ internal static unsafe class Plugin
     private static bool _busy;
     private static bool _popupsCreated;
 
+    // Ventana de Claude recién lanzada que hay que colocar como panel en cuanto aparezca
+    private static string _placeTitle = "";
+    private static DateTime _placeUntil;
+
     // ================================================================ ciclo de vida
 
     public static void Activate()
@@ -97,10 +101,11 @@ internal static unsafe class Plugin
         Link? link = ExportActiveWindow();
         if (link == null) return;
 
-        string prompt = Prompts.Open(link.Ws, link.Title, link.Ws.Relative(link.Path), ConnectionText(), link.Original);
+        string copy = link.Ws.Relative(link.Path);
+        string prompt = Prompts.Open(link.Ws, link.Title, copy, ConnectionText(), link.Original);
+        string again = Prompts.Again(link.Title, copy, ConnectionText(), null);
 
-        if (Launch(link.Ws, prompt))
-            Ide.Status($"Claude Code abierto con {System.IO.Path.GetFileName(link.Path)}{Where(link.Ws)}");
+        Launch(link.Ws, prompt, again, $"Claude Code abierto con {System.IO.Path.GetFileName(link.Path)}{Where(link.Ws)}");
     }
 
     private static void AskAboutSelection()
@@ -121,11 +126,12 @@ internal static unsafe class Plugin
             System.IO.Path.GetFileNameWithoutExtension(link.Path) + ".seleccion" + System.IO.Path.GetExtension(link.Path));
         File.WriteAllText(selPath, ToCrlf(Normalize(selection)) + "\r\n", Utf8NoBom);
 
-        string prompt = Prompts.Selection(link.Ws, link.Title, link.Ws.Relative(link.Path), ConnectionText(), link.Original,
+        string copy = link.Ws.Relative(link.Path);
+        string prompt = Prompts.Selection(link.Ws, link.Title, copy, ConnectionText(), link.Original,
             link.Ws.Relative(selPath), line);
+        string again = Prompts.Again(link.Title, copy, ConnectionText(), (link.Ws.Relative(selPath), line));
 
-        if (Launch(link.Ws, prompt))
-            Ide.Status("Claude Code abierto con la selección" + Where(link.Ws));
+        Launch(link.Ws, prompt, again, "Claude Code abierto con la selección" + Where(link.Ws));
     }
 
     private static void PullChanges()
@@ -360,6 +366,7 @@ internal static unsafe class Plugin
         _busy = true;
         try
         {
+            PlacePending();
             CheckActiveWindow();
         }
         catch (Exception e)
@@ -407,8 +414,47 @@ internal static unsafe class Plugin
 
     // ================================================================ lanzar Claude Code
 
-    private static bool Launch(Workspace ws, string prompt)
+    /// <summary>Título de la ventana de Claude de una carpeta: sirve para encontrarla y reutilizarla.</summary>
+    private static string ClaudeTitle(Workspace ws) =>
+        (ws.IsProject ? $"Claude Code - {ws.Label}" : "Claude Code - PL/SQL Developer").Replace(';', ',');
+
+    /// <summary>Coloca como panel la ventana de Claude que se acaba de lanzar, en cuanto aparece (como mucho 30 s).</summary>
+    private static void PlacePending()
     {
+        if (_placeTitle.Length == 0) return;
+        if (DateTime.UtcNow > _placeUntil)
+        {
+            _placeTitle = "";
+            return;
+        }
+        nint hwnd = Win32.FindTopWindow(_placeTitle);
+        if (hwnd == 0) return;
+        _placeTitle = "";
+        Win32.PlaceSide(hwnd, Config.PanelPercent);
+    }
+
+    /// <summary>
+    /// Abre Claude Code en la carpeta de trabajo. Con PanelLateral, si ya hay una ventana de Claude de esa carpeta,
+    /// la trae al frente y deja en el portapapeles <paramref name="again"/> para pegarlo, en vez de abrir otra.
+    /// </summary>
+    private static bool Launch(Workspace ws, string prompt, string again, string status)
+    {
+        string title = ClaudeTitle(ws);
+        if (Config.SidePanel)
+        {
+            nint existing = Win32.FindTopWindow(title);
+            if (existing != 0)
+            {
+                bool copied = Win32.SetClipboardText(again);
+                Win32.BringToFront(existing);
+                Win32.PlaceSide(existing, Config.PanelPercent);
+                Ide.Status(copied
+                    ? "Claude ya estaba abierto para esta carpeta: pega con Ctrl+V lo que te he copiado y pulsa Intro."
+                    : "Claude ya estaba abierto para esta carpeta (no he podido copiar la referencia: usa Copiar referencia).");
+                return true;
+            }
+        }
+
         EnsureWorkspace(ws);
         CleanOldLaunchers(ws);
 
@@ -421,23 +467,22 @@ internal static unsafe class Plugin
         // Comando de Claude Code. El servidor MCP de SQLcl se pasa con --mcp-config desde %APPDATA%,
         // para no dejar un .mcp.json en la carpeta del expediente.
         string claude = PsQuote(Config.ClaudeCommand);
-        var command = new List<string> { "&", claude };
+        var options = new List<string>();
         if (Config.SqlclPath.Length > 0)
         {
             string mcpFile = System.IO.Path.Combine(Config.Dir, "mcp-sqlcl.json");
             Directory.CreateDirectory(Config.Dir);
             File.WriteAllText(mcpFile, Templates.McpJson(Config.SqlclPath), Utf8NoBom);
-            command.Add("--mcp-config");
-            command.Add(PsQuote(mcpFile));
+            options.Add("--mcp-config");
+            options.Add(PsQuote(mcpFile));
         }
-        if (Config.ExtraArgs.Length > 0) command.Add(Config.ExtraArgs);
-        command.Add("$prompt");
-
-        string windowTitle = ws.IsProject ? $"Claude Code - {ws.Label}" : "Claude Code - PL/SQL Developer";
+        if (Config.ExtraArgs.Length > 0) options.Add(Config.ExtraArgs);
+        string opts = options.Count > 0 ? " " + string.Join(" ", options) : "";
 
         var ps = new StringBuilder();
         ps.AppendLine("try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}");
-        ps.AppendLine($"$Host.UI.RawUI.WindowTitle = {PsQuote(windowTitle)}");
+        ps.AppendLine($"$Host.UI.RawUI.WindowTitle = {PsQuote(title)}");
+        ps.AppendLine("$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1'  # que Claude no cambie el título: el plug-in busca la ventana por él");
         ps.AppendLine($"Set-Location -LiteralPath {PsQuote(ws.Root)}");
         ps.AppendLine($"$prompt = Get-Content -LiteralPath {PsQuote(promptFile)} -Raw -Encoding UTF8");
         ps.AppendLine($"Remove-Item -LiteralPath {PsQuote(promptFile)}, {PsQuote(script)} -ErrorAction SilentlyContinue");
@@ -446,23 +491,41 @@ internal static unsafe class Plugin
         ps.AppendLine("  Write-Host 'Instala Claude Code o pon la ruta completa en ComandoClaude (plug-in > Configurar).' -ForegroundColor Red");
         ps.AppendLine("  return");
         ps.AppendLine("}");
-        ps.AppendLine(string.Join(" ", command));
+        if (Config.ContinueConversation)
+        {
+            // Retoma la última conversación de esta carpeta; si no hay ninguna y claude termina con error enseguida,
+            // abre una nueva con el mismo mensaje.
+            ps.AppendLine("$inicio = Get-Date");
+            ps.AppendLine($"& {claude} --continue{opts} $prompt");
+            ps.AppendLine("if ($LASTEXITCODE -ne 0 -and ((Get-Date) - $inicio).TotalSeconds -lt 20) {");
+            ps.AppendLine($"  & {claude}{opts} $prompt");
+            ps.AppendLine("}");
+        }
+        else
+        {
+            ps.AppendLine($"& {claude}{opts} $prompt");
+        }
         File.WriteAllText(script, ps.ToString(), new UTF8Encoding(true)); // con BOM para Windows PowerShell 5.1
 
         string psArgs = $"-NoLogo -NoExit -ExecutionPolicy Bypass -File {Quote(script)}";
         string wt = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "wt.exe");
         bool useWt = Config.Terminal == "wt" || (Config.Terminal == "auto" && File.Exists(wt));
-        string wtTitle = ws.IsProject ? $"Claude {ws.Number}" : "Claude Code";
 
         try
         {
             ProcessStartInfo psi = useWt
-                ? new ProcessStartInfo(File.Exists(wt) ? wt : "wt.exe", $"-d {Quote(ws.Root)} --title \"{wtTitle}\" {Config.Shell} {psArgs}")
+                ? new ProcessStartInfo(File.Exists(wt) ? wt : "wt.exe", $"-d {Quote(ws.Root)} --title \"{title}\" {Config.Shell} {psArgs}")
                 : new ProcessStartInfo(Config.Shell, psArgs);
             psi.UseShellExecute = true;
             psi.WorkingDirectory = ws.Root;
             Process.Start(psi);
+            Ide.Status(status);
+            if (Config.SidePanel)
+            {
+                _placeTitle = title;
+                _placeUntil = DateTime.UtcNow.AddSeconds(30);
+            }
             return true;
         }
         catch (Exception e)
