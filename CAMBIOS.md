@@ -13,6 +13,9 @@
 - **Instalador**: pregunta si quieres recibir actualizaciones automáticas (`ActualizacionesAutomaticas`); publicar las
   skills ya no se pregunta, lo activa quien las mantiene con `instalar.ps1 -Publicar`. Corregidos el error al guardar
   los ajustes («La colección tiene un tamaño fijo») y el nombre de la skill que faltaba en la pregunta.
+- **La actualización ya no puede dejarte sin plug-in si el antivirus retira la DLL nueva**: primero la copia con otro
+  nombre y solo cambia la que funciona si la nueva sigue ahí; si desaparece después, vuelve a poner la anterior. En
+  los dos casos avisa de que ha sido el antivirus y de qué excepción pedir a sistemas.
 
 ## 1.6 (EDISA)
 

@@ -77,8 +77,20 @@ try {
     # ------------------------------------------------------------------------ 2. la DLL
     $dll = Ajuste 'DllInstalada'
     $nueva = Join-Path $repo 'ClaudeCodePlsql.dll'
-    if ($dll -and (Test-Path -LiteralPath $nueva) -and (Hash $nueva) -ne (Hash $dll)) {
+    $antivirus = 'Seguramente la ha retirado el antivirus del equipo: pide a sistemas una excepcion para ClaudeCodePlsql.dll ' +
+                 "(en $env:APPDATA\ClaudeCodePlsql y en la carpeta de plug-ins de PL/SQL Developer). El plug-in sigue con la version anterior."
+    if ($dll -and -not (Test-Path -LiteralPath $nueva)) {
+        $estado.errores += "La version publicada no tiene la DLL en $repo. $antivirus"
+    }
+    elseif ($dll -and (Hash $nueva) -ne (Hash $dll)) {
+        $prep = "$dll.nueva"
         try {
+            # Primero con otro nombre, y se espera un poco: si el antivirus la retira, la DLL que funciona no se ha tocado
+            Copy-Item -LiteralPath $nueva -Destination $prep -Force
+            Start-Sleep -Seconds 5
+            if (-not (Test-Path -LiteralPath $prep) -or (Hash $prep) -ne (Hash $nueva)) { throw "La DLL nueva ha desaparecido al copiarla. $antivirus" }
+
+            $old = $null
             if (Test-Path -LiteralPath $dll) {
                 # La cargada no se puede sobrescribir, pero si renombrar; la .old de la vez anterior ya no esta cargada
                 $old = "$dll.old"
@@ -86,10 +98,19 @@ try {
                 if (Test-Path -LiteralPath $old) { $old = "$dll.$(Get-Date -Format 'yyyyMMddHHmmss').old" }
                 Rename-Item -LiteralPath $dll -NewName (Split-Path $old -Leaf)
             }
-            Copy-Item -LiteralPath $nueva -Destination $dll -Force
+            Rename-Item -LiteralPath $prep -NewName (Split-Path $dll -Leaf)
+            Start-Sleep -Seconds 3
+            if (-not (Test-Path -LiteralPath $dll)) {
+                # Si aun asi desaparece, se vuelve a poner la anterior para no quedarse sin plug-in
+                if ($old -and (Test-Path -LiteralPath $old)) { Copy-Item -LiteralPath $old -Destination $dll -Force }
+                throw "La DLL nueva ha desaparecido despues de instalarla. $antivirus"
+            }
             $estado.dll_nueva = $true
         } catch {
-            $estado.errores += "No he podido dejar la DLL nueva en $dll ($($_.Exception.Message)). Puede que haga falta ser administrador para escribir en esa carpeta."
+            if (Test-Path -LiteralPath $prep) { Remove-Item -LiteralPath $prep -Force -ErrorAction SilentlyContinue }
+            $msg = $_.Exception.Message
+            if ($msg -notmatch 'antivirus') { $msg = "No he podido dejar la DLL nueva en $dll ($msg). Puede que haga falta ser administrador para escribir en esa carpeta." }
+            $estado.errores += $msg
         }
     }
 
