@@ -15,6 +15,8 @@ internal static unsafe class Ide
     /// <summary>Codificación de las cadenas que viajan por el interface. Se pasa a UTF-8 en OnActivate si el IDE lo admite.</summary>
     public static Encoding Enc = AnsiEncoding();
 
+    private static readonly Encoding Cp1252 = AnsiEncoding();
+
     // Índices documentados de RegisterCallback
     private const int CB_SYS_Version = 1;
     private const int CB_IDE_Connected = 11;
@@ -167,6 +169,39 @@ internal static unsafe class Ide
     {
         if (_setText == 0) return false;
         fixed (byte* p = H(text))
+        {
+            return ((delegate* unmanaged[Cdecl]<byte*, int>)_setText)(p) != 0;
+        }
+    }
+
+    /// <summary>
+    /// Pone el texto en el editor y lo relee para comprobar que ha llegado igual. Si no (el IDE ha interpretado los
+    /// bytes con otra codificación y las tildes salen como «Ã³»), lo repite en UTF-8 con BOM y después en
+    /// Windows-1252. Devuelve si el IDE ha aceptado el texto y la codificación con la que ha llegado bien, o null si
+    /// con ninguna (entonces deja la primera, la de siempre).
+    /// </summary>
+    public static (bool Set, string? Encoding) SetTextVerified(string text, Func<string, string> normalize)
+    {
+        if (_setText == 0) return (false, null);
+        string expected = normalize(text);
+        byte[] utf8Bom = [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes(text), 0];
+        byte[] ansi = [.. Cp1252.GetBytes(text), 0];
+        (string Name, byte[] Bytes)[] attempts = Enc.CodePage == Cp1252.CodePage
+            ? new[] { (Enc.WebName, H(text)) }
+            : new[] { (Enc.WebName, H(text)), ("utf-8 con BOM", utf8Bom), (Cp1252.WebName, ansi) };
+
+        foreach ((string name, byte[] bytes) in attempts)
+        {
+            if (!SetBytes(bytes)) return (false, null);
+            if (normalize(GetText()) == expected) return (true, name);
+        }
+        SetBytes(attempts[0].Bytes);
+        return (true, null);
+    }
+
+    private static bool SetBytes(byte[] bytes)
+    {
+        fixed (byte* p = bytes)
         {
             return ((delegate* unmanaged[Cdecl]<byte*, int>)_setText)(p) != 0;
         }
