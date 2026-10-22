@@ -29,6 +29,11 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
 | **Conectar a BBDD** | Deja que Claude consulte la BD de la sesión activa, solo en el proyecto de esa ventana (ver *Consultas de Claude a la base de datos*). |
 | **Desconectar BBDD** | Quita las BBDD conectadas en el proyecto de la ventana; la de desarrollo se queda. |
 | **Fijar como BD de desarrollo** | Hace de la sesión activa la BD que Claude consulta por defecto en todos los proyectos. |
+| **Comparar con otra BD** | Claude compara el objeto de la ventana entre desarrollo y las BBDD del proyecto: qué cambia y qué versión tiene cada una. |
+| **Revisar normas** | Claude revisa la ventana con las normas de EDISA y busca errores probables; te da la lista por línea sin tocar nada. |
+| **Explicar error** | Copia el error de PL/SQL Developer y pulsa: Claude explica la causa y cómo arreglarlo (si no hay nada copiado, lo busca en `ALL_ERRORS`). |
+| **Documentación** | En un expediente: A18 y manual de desarrollo con sus skills. |
+| **Preparar instalación** | En un expediente: lista y orden de compilación de los fuentes y el script de instalación. |
 
 ### Cómo funciona
 
@@ -77,7 +82,51 @@ artefacto `ClaudeCodePlsql-x64` (o `-x86`).
 > La DLL tiene que ser de la misma arquitectura que PL/SQL Developer. Desde la versión 16 solo hay
 > 64 bits. Lo puedes ver en *Help > About*.
 
-## Instalar
+## Instalar (con actualización automática)
+
+Lo normal en la organización. Hace falta acceso al repositorio en GitHub y Git instalado
+(`winget install --id Git.Git -e`).
+
+1. Baja la versión publicada (la primera vez te pedirá iniciar sesión en GitHub en el navegador):
+
+   ```powershell
+   git clone --branch publicado <url del repositorio> "$env:APPDATA\ClaudeCodePlsql\repo"
+   ```
+
+2. Ejecuta el instalador y contesta a sus preguntas:
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$env:APPDATA\ClaudeCodePlsql\repo\instalar.ps1"
+   ```
+
+   Antes de tocar nada revisa lo que hace falta y los conflictos: Git, Claude Code, el cliente de Oracle, la carpeta
+   de plug-ins de PL/SQL Developer (y si se puede escribir en ella), versiones anteriores del plug-in, skills tuyas
+   con el mismo nombre que las del paquete (las tuyas no se pisan si no quieres) y ajustes de Claude Code que
+   desactiven los hooks. Después pregunta qué skills quieres (ver *Paquete de expedientes*) y deja la DLL en su sitio.
+3. Abre PL/SQL Developer.
+
+A partir de ahí, **cada vez que arranca PL/SQL Developer** el plug-in lanza en segundo plano `actualizar.ps1`: baja
+la última versión publicada, deja preparada la DLL nueva (se aplica al reiniciar; te avisa con un mensaje) y pone al
+día las skills que elegiste. Para cambiar lo elegido, vuelve a ejecutar `instalar.ps1`. El resultado de la última
+actualización queda en `%APPDATA%\ClaudeCodePlsql\actualizacion.json`.
+
+## Paquete de expedientes (opcional)
+
+Al instalar se puede elegir cada una de estas skills de Claude, que se instalan en `~/.claude/skills` y se
+actualizan solas:
+
+| Skill | Qué hace |
+|---|---|
+| `proyecto-expediente` | Monta la carpeta del expediente (`cfcliente`, `cfstd`, `doc`, `instalacion`, `test`), deja la documentación en `doc/` con su resumen y lleva el seguimiento en tu panel **Mis expedientes**, que crea la primera vez a partir de una plantilla vacía. Opcionalmente, la **tarea programada** que revisa correo y Teams dos veces al día y lo apunta en el panel. |
+| `a18-acta-entrega` | Genera el A18 (Acta de Entrega de Desarrollo) con la plantilla oficial. |
+| `manual-desarrollo` | Genera el manual de desarrollo para el cliente con la plantilla oficial. |
+
+Las skills vienen de las de quien las mantiene: en su equipo, `herramientas\sincronizar-skills.ps1` las copia al
+repositorio (la de expedientes, en una versión sin sus datos: cada uno usa su propio panel) y las publica cuando
+cambian. Si al instalar tiene las originales, el instalador le ofrece hacerlo solo al arrancar PL/SQL Developer
+(`PublicarSkills=si`).
+
+## Instalar a mano (sin actualizaciones)
 
 1. Cierra PL/SQL Developer.
 2. Copia `ClaudeCodePlsql.dll` a la carpeta `PlugIns` de la instalación, por ejemplo

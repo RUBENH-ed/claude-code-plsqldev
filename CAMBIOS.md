@@ -1,5 +1,18 @@
 # Cambios
 
+## 1.6 (EDISA)
+
+- **Grupo Herramientas en la cinta**: *Comparar con otra BD*, *Revisar normas*, *Explicar error* (con el error
+  copiado al portapapeles), *Documentación* (A18 y manual) y *Preparar instalación*. Al conectar una BD del proyecto,
+  Claude avisa de las diferencias de versión de los objetos del expediente respecto a desarrollo.
+- **Instalador y actualización automática**: `instalar.ps1` revisa requisitos y conflictos antes de tocar nada y
+  pregunta qué instalar; al arrancar PL/SQL Developer, `actualizar.ps1` baja la última versión de la rama
+  `publicado` (que rehace GitHub Actions con cada cambio en `main`), deja preparada la DLL nueva y pone al día las
+  skills elegidas.
+- **Paquete de expedientes opcional**: las skills `proyecto-expediente` (en versión sin datos personales, con la
+  plantilla del panel **Mis expedientes** y la tarea programada opcional), `a18-acta-entrega` y `manual-desarrollo`.
+  `herramientas\sincronizar-skills.ps1` las publica desde el equipo de quien las mantiene.
+
 ## 1.5 (EDISA)
 
 - **Sin depender de ninguna skill.** El plug-in trae su propio envoltorio de consultas,

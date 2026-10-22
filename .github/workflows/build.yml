@@ -1,9 +1,12 @@
 # Compila la DLL en GitHub (no hace falta instalar nada en tu equipo).
 # Sube el proyecto a un repositorio, ve a Actions > build > Run workflow y descarga el artefacto.
+# Con cada cambio en main, además, publica la versión en la rama "publicado", de donde la bajan el instalador y la
+# actualización automática de cada equipo.
 name: build
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -26,3 +29,34 @@ jobs:
         with:
           name: ClaudeCodePlsql-${{ matrix.arch }}
           path: dist/${{ matrix.arch }}/ClaudeCodePlsql.dll
+
+  # La rama "publicado" solo lleva lo que necesita un equipo: la DLL de 64 bits, los scripts, el paquete de skills y
+  # la documentación. Se rehace entera en cada versión (las copias de los equipos la bajan con fetch + reset).
+  publicar:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClaudeCodePlsql-x64
+          path: dist
+
+      - name: Publicar en la rama publicado
+        run: |
+          mkdir pub
+          cp dist/ClaudeCodePlsql.dll instalar.ps1 actualizar.ps1 README.md CAMBIOS.md pub/
+          cp -r paquete pub/
+          printf '* -text\n' > pub/.gitattributes
+          echo "${GITHUB_SHA::7} $(date -u +%Y-%m-%dT%H:%MZ)" > pub/VERSION
+          cd pub
+          git init -q -b publicado
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Versión ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" publicado

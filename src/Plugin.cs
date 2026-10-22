@@ -66,6 +66,8 @@ internal static unsafe class Plugin
             _iconsCreated = true;
         }
 
+        StartUpdate();
+
         if (_timer == 0)
             _timer = Win32.SetTimer(0, 0, 1500, (nint)(delegate* unmanaged[Stdcall]<nint, uint, nuint, uint, void>)&OnTimer);
     }
@@ -718,6 +720,89 @@ internal static unsafe class Plugin
         return true;
     }
 
+    // ================================================================ actualización automática
+
+    private static DateTime _updateStartedUtc;
+    private static bool _updateStarted, _updateWaiting;
+
+    /// <summary>
+    /// Lanza en segundo plano actualizar.ps1 de la copia del repositorio que deja instalar.ps1 (%APPDATA%\ClaudeCodePlsql\repo):
+    /// baja la versión publicada, deja preparada la DLL nueva y pone al día las skills elegidas. Una vez por arranque.
+    /// </summary>
+    private static void StartUpdate()
+    {
+        if (_updateStarted) return;
+        _updateStarted = true;
+        string script = System.IO.Path.Combine(Config.Dir, "repo", "actualizar.ps1");
+        if (!File.Exists(script)) return; // instalado a mano, sin actualizaciones automáticas
+        try
+        {
+            _updateStartedUtc = DateTime.UtcNow;
+            Process.Start(new ProcessStartInfo("powershell.exe",
+                $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File {Quote(script)}")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            })?.Dispose();
+            _updateWaiting = true;
+        }
+        catch (Exception e)
+        {
+            Log.Error(e);
+        }
+    }
+
+    /// <summary>Desde el temporizador: cuando actualizar.ps1 deja su resultado, avisa una vez de lo que haya.</summary>
+    private static void CheckUpdate()
+    {
+        if (!_updateWaiting) return;
+        if (DateTime.UtcNow - _updateStartedUtc > TimeSpan.FromMinutes(5)) { _updateWaiting = false; return; }
+        string file = System.IO.Path.Combine(Config.Dir, "actualizacion.json");
+        if (!File.Exists(file) || File.GetLastWriteTimeUtc(file) < _updateStartedUtc) return;
+        _updateWaiting = false;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file));
+            var root = doc.RootElement;
+            string version = Prop(root, "version");
+            List<string> errors = Strings(root, "errores"), conflicts = Strings(root, "conflictos"), skills = Strings(root, "skills");
+            foreach (string s in errors.Concat(conflicts)) Log.Info($"Actualización: {s}");
+
+            if (root.TryGetProperty("dll_nueva", out var dllNueva) && dllNueva.ValueKind == System.Text.Json.JsonValueKind.True)
+            {
+                Log.Info($"Actualización: versión {version} preparada.");
+                Win32.Message($"Hay una versión nueva del plug-in de Claude Code ({version}). Se aplicará cuando reinicies " +
+                              "PL/SQL Developer.\n\nLas novedades están en CAMBIOS.md.", Win32.MB_ICONINFORMATION);
+            }
+            else if (skills.Count > 0)
+            {
+                Ide.Status($"Skills de Claude actualizadas: {string.Join(", ", skills)}");
+            }
+            if (errors.Count > 0) Ide.Status($"No se ha podido actualizar el plug-in de Claude Code: {errors[0]}");
+        }
+        catch (Exception e)
+        {
+            Log.Error(e);
+        }
+    }
+
+    private static List<string> Strings(System.Text.Json.JsonElement e, string name)
+    {
+        var list = new List<string>();
+        if (e.ValueKind != System.Text.Json.JsonValueKind.Object || !e.TryGetProperty(name, out var v)) return list;
+        if (v.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var x in v.EnumerateArray())
+                if (x.ValueKind == System.Text.Json.JsonValueKind.String && x.GetString() is { Length: > 0 } s) list.Add(s);
+        }
+        else if (v.ValueKind == System.Text.Json.JsonValueKind.String && v.GetString() is { Length: > 0 } one)
+        {
+            list.Add(one);
+        }
+        return list;
+    }
+
     /// <summary>Temporizador en el hilo principal del IDE: detecta cuándo Claude ha cambiado el fichero de la ventana activa.</summary>
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static void OnTimer(nint hwnd, uint msg, nuint id, uint time)
@@ -726,6 +811,7 @@ internal static unsafe class Plugin
         _busy = true;
         try
         {
+            CheckUpdate();
             PlacePending();
             CheckActiveWindow();
         }

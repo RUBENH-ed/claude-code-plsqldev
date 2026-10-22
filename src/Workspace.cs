@@ -183,7 +183,7 @@ internal static class Prompts
             : $" Fichero original: {original} (no lo edites: los cambios le llegan cuando los guardo en PL/SQL Developer).";
 
     private static string End(Workspace ws) =>
-        ws.IsProject ? " Sigue la skill proyecto-expediente (modo E)." : "";
+        ws.IsProject ? " Si tienes la skill proyecto-expediente, úsala para el seguimiento de este expediente." : "";
 }
 
 /// <summary>Comprobación de que un texto se puede guardar en Windows-1252, la codificación de los fuentes de LIBRA.</summary>
