@@ -1,5 +1,20 @@
 # Cambios
 
+## 1.3 (EDISA)
+
+- **Solo consultas contra la base de datos.** Cada vez que abre Claude, el plug-in escribe en
+  `%APPDATA%\ClaudeCodePlsql` un hook (`solo-consultas.ps1`) y sus ajustes (`settings-plugin.json`) y los pasa con
+  `--settings`, así que solo valen para las sesiones del plug-in. El hook solo deja pasar un `SELECT` o `WITH` por
+  llamada a `run-sql` del servidor `sqlcl`, y siempre pide aprobación. Bloquea DML, DDL, PL/SQL, `COMMIT`,
+  `FOR UPDATE`, los comandos de SQLcl (`host`, `@script`...), el resto de herramientas de SQLcl salvo conectar y
+  listar conexiones, otros servidores MCP de base de datos, los clientes de Oracle desde la consola (`sqlplus`,
+  `sql`, `sqlldr`...) y que Claude toque la carpeta del plug-in o los `settings.json` de Claude Code. Si algo falla
+  al comprobar, bloquea. Además se le da la norma a Claude con `--append-system-prompt`.
+- **Tildes al cargar los cambios de Claude.** Después de poner el texto en el editor, el plug-in lo relee y lo
+  compara con la copia. Si no coincide (tildes como «Ã³»), lo repite en UTF-8 con BOM y, si tampoco, en
+  Windows-1252. Si con ninguna coincide, avisa antes de que compiles o ejecutes. En `plugin.log` queda con qué
+  codificación ha llegado bien.
+
 ## 1.2 (EDISA)
 
 - **Una ventana de Claude por expediente, como panel.** La primera vez se abre y se coloca a la derecha de la
