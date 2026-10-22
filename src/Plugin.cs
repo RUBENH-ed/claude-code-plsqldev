@@ -257,6 +257,20 @@ internal static unsafe class Plugin
         }
     }
 
+    /// <summary>Escribe el fichero solo si su contenido ha cambiado (otra sesión de Claude puede estar leyéndolo).</summary>
+    private static void WriteIfChanged(string path, string content, Encoding encoding)
+    {
+        try
+        {
+            if (File.Exists(path) && File.ReadAllText(path) == content) return;
+        }
+        catch (IOException)
+        {
+            // si no se puede leer, se intenta escribir igualmente
+        }
+        File.WriteAllText(path, content, encoding);
+    }
+
     private static void WriteIfMissing(string path, string content)
     {
         if (!File.Exists(path)) File.WriteAllText(path, ToCrlf(content.Replace("\r\n", "\n")), Utf8NoBom);
@@ -343,10 +357,23 @@ internal static unsafe class Plugin
         }
 
         int line = Ide.CursorLine;
-        if (!Ide.SetText(ToCrlf(diskNormalized)))
+        (bool set, string? encoding) = Ide.SetTextVerified(ToCrlf(diskNormalized), Normalize);
+        if (!set)
         {
             Win32.Message("PL/SQL Developer no ha permitido cambiar el texto (¿la ventana es de solo lectura?).", Win32.MB_ICONWARNING);
             return false;
+        }
+        if (encoding == null)
+        {
+            Log.Info($"{name}: después de cargarlo, el texto del editor no coincide con el fichero con ninguna codificación.");
+            Win32.Message(
+                $"He cargado los cambios de Claude ({name}), pero al releer el editor el texto no coincide con el fichero: " +
+                "puede que las tildes o algún carácter no hayan llegado bien. Revísalo antes de compilar o ejecutar.",
+                Win32.MB_ICONWARNING);
+        }
+        else if (encoding != Ide.Enc.WebName)
+        {
+            Log.Info($"{name}: con {Ide.Enc.WebName} el texto llegaba mal al editor; cargado en {encoding}.");
         }
 
         int lines = diskNormalized.Count(c => c == '\n') + 1;
@@ -468,6 +495,19 @@ internal static unsafe class Plugin
         // para no dejar un .mcp.json en la carpeta del expediente.
         string claude = PsQuote(Config.ClaudeCommand);
         var options = new List<string>();
+
+        // Norma de solo consultas contra la base de datos: el hook y sus ajustes se reescriben en cada arranque (por si
+        // alguien los ha tocado) y se pasan con --settings, así que solo valen para las sesiones del plug-in.
+        Directory.CreateDirectory(Config.Dir);
+        string hookFile = System.IO.Path.Combine(Config.Dir, "solo-consultas.ps1");
+        string settingsFile = System.IO.Path.Combine(Config.Dir, "settings-plugin.json");
+        WriteIfChanged(hookFile, Templates.HookSoloConsultas, new UTF8Encoding(true)); // con BOM para Windows PowerShell 5.1
+        WriteIfChanged(settingsFile, Templates.SettingsJson(hookFile), Utf8NoBom);
+        options.Add("--settings");
+        options.Add(PsQuote(settingsFile));
+        options.Add("--append-system-prompt");
+        options.Add(PsQuote(Templates.ReglaSoloConsultas));
+
         if (Config.SqlclPath.Length > 0)
         {
             string mcpFile = System.IO.Path.Combine(Config.Dir, "mcp-sqlcl.json");
