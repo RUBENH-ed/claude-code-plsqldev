@@ -1,5 +1,23 @@
 # Cambios
 
+## 1.4 (EDISA)
+
+- **BBDD para Claude, con la skill desa04-sqlplus.** Grupo nuevo *Base de datos* en la cinta (en el menú clásico,
+  *Tools > Claude Code*):
+  - **Fijar como BD de desarrollo**: la sesión activa queda como la base que Claude consulta por defecto en todos los
+    proyectos.
+  - **Conectar a BBDD**: añade la sesión activa al proyecto de esa ventana, junto a las que ya tuviera; con un alias
+    que no parece de pruebas ni de desarrollo, pide confirmación. **Desconectar BBDD** las quita.
+  - Usuario, contraseña y servidor salen de la sesión (el alias se resuelve con el `TNS_ADMIN` de PL/SQL Developer)
+    y se guardan en `.env` de `%APPDATA%\ClaudeCodePlsql\bbdd`, nunca en la carpeta del expediente. La contraseña va
+    por stdin al script `alta-bbdd.ps1`; Claude no la ve. Admite usuarios proxy (`SOPORTE[LIBRA]`).
+- **El hook de solo consultas** admite el `query.ps1` de la skill (`-Sql`, `-File`, `-EnvFile`, `-MaxLines`) con una
+  sola sentencia `SELECT`, `WITH` o `DESCRIBE` y pidiendo aprobación; `-EnvFile` solo puede ser la de desarrollo o
+  una del proyecto de la sesión (`CLAUDE_PLSQL_PROYECTO`). Bloquea leer los `.env`, `mkstore` y los wallets.
+- **Mod de Claude Code** con una franja encima del cuadro de escritura: a qué BBDD está conectada la sesión
+  (desarrollo y las del proyecto, en rojo las de producción). Se carga con `--plugin-dir` y se refresca solo.
+- **Iconos propios en la cinta** (SVG que se adaptan al tema claro u oscuro) para cada opción del plug-in.
+
 ## 1.3 (EDISA)
 
 - **Solo consultas contra la base de datos.** Cada vez que abre Claude, el plug-in escribe en
