@@ -30,6 +30,7 @@ internal static unsafe class Ide
     private const int CB_IDE_SetText = 34;
     private const int CB_IDE_SetStatusMessage = 35;
     private const int CB_IDE_CreatePopupItem = 69;
+    private const int CB_IDE_CreateToolButton = 150;
     private const int CB_IDE_GetWindowObject = 110;
     private const int CB_IDE_GetCursorY = 142;
     private const int CB_IDE_SetCursor = 143;
@@ -43,7 +44,7 @@ internal static unsafe class Ide
     private static nint _sysVersion, _connected, _getConnectionInfo, _getWindowType, _getWindowHandle,
         _getChildHandle, _filename, _getText, _getSelectedText, _setText, _setStatusMessage,
         _createPopupItem, _getWindowObject, _getCursorY, _setCursor, _tabInfo, _tabIndex,
-        _windowHasEditor, _plugInSetting, _getConnectionInfoEx, _getWindowConnection;
+        _windowHasEditor, _plugInSetting, _getConnectionInfoEx, _getWindowConnection, _createToolButton;
 
     public static void Register(int index, nint addr)
     {
@@ -61,6 +62,7 @@ internal static unsafe class Ide
             case CB_IDE_SetText: _setText = addr; break;
             case CB_IDE_SetStatusMessage: _setStatusMessage = addr; break;
             case CB_IDE_CreatePopupItem: _createPopupItem = addr; break;
+            case CB_IDE_CreateToolButton: _createToolButton = addr; break;
             case CB_IDE_GetWindowObject: _getWindowObject = addr; break;
             case CB_IDE_GetCursorY: _getCursorY = addr; break;
             case CB_IDE_SetCursor: _setCursor = addr; break;
@@ -145,6 +147,35 @@ internal static unsafe class Ide
         }
 
         return ("", "");
+    }
+
+    /// <summary>
+    /// Usuario, contraseña y base de datos de la ventana activa. Solo lo usan los botones de BBDD, que pasan la
+    /// contraseña por stdin al script que escribe el .env del plug-in: Claude no la ve.
+    /// </summary>
+    public static (string User, string Password, string Database) ConnectionWithPassword()
+    {
+        byte* u = null, p = null, d = null, a = null;
+
+        if (_getWindowConnection != 0 && _getConnectionInfoEx != 0)
+        {
+            int ix = ((delegate* unmanaged[Cdecl]<int>)_getWindowConnection)();
+            if (ix >= 0 &&
+                ((delegate* unmanaged[Cdecl]<int, byte**, byte**, byte**, byte**, int>)_getConnectionInfoEx)(ix, &u, &p, &d, &a) != 0)
+            {
+                string user = S(u);
+                if (user.Length > 0) return (user, S(p), S(d));
+            }
+        }
+
+        if (_getConnectionInfo != 0)
+        {
+            u = p = d = null;
+            ((delegate* unmanaged[Cdecl]<byte**, byte**, byte**, void>)_getConnectionInfo)(&u, &p, &d);
+            return (S(u), S(p), S(d));
+        }
+
+        return ("", "", "");
     }
 
     /// <summary>1 = SQL, 2 = Test, 3 = Programa, 4 = Comandos, 5 = Plan, 6 = Informe, 0 = otra.</summary>
@@ -240,6 +271,17 @@ internal static unsafe class Ide
     public static void SetCursor(int x, int y)
     {
         if (_setCursor != 0) ((delegate* unmanaged[Cdecl]<int, int, void>)_setCursor)(x, y);
+    }
+
+    /// <summary>Icono de una opción del menú o de la cinta (mismo índice que CreateMenuItem): fichero .bmp, .png o .svg.</summary>
+    public static void CreateToolButton(int index, string name, string bitmapFile)
+    {
+        if (_createToolButton == 0) return;
+        fixed (byte* n = H(name))
+        fixed (byte* f = H(bitmapFile))
+        {
+            ((delegate* unmanaged[Cdecl]<int, int, byte*, byte*, nint, void>)_createToolButton)(PluginId, index, n, f, 0);
+        }
     }
 
     /// <summary>Añade una opción al menú contextual (clic derecho) de un tipo de ventana.</summary>
