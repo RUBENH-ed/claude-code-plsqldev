@@ -8,6 +8,11 @@
 # Revisa lo que hace falta y los conflictos antes de tocar nada, pregunta que quieres instalar, deja la DLL en la
 # carpeta de plug-ins de PL/SQL Developer y activa la actualizacion automatica. Se puede volver a ejecutar para
 # cambiar lo elegido.
+#
+# Quien mantiene las skills del paquete (las tiene originales en su cuenta de claude.ai) lo ejecuta una vez con
+# -Publicar para que, al arrancar PL/SQL Developer, sus cambios se publiquen para los demas.
+param([switch]$Publicar)
+
 $ErrorActionPreference = 'Stop'
 $dirPlugin = Join-Path $env:APPDATA 'ClaudeCodePlsql'
 $repo = Join-Path $dirPlugin 'repo'
@@ -105,7 +110,7 @@ $catalogo = [ordered]@{
 $elegidas = @()
 foreach ($s in $catalogo.Keys) {
     Write-Host "  - $($catalogo[$s])"
-    if (SiNo "    ¿Instalar $s?" ($previas.Count -eq 0 -or $previas -contains $s)) { $elegidas += $s }
+    if (SiNo "    ¿Instalar ${s}?"($previas.Count -eq 0 -or $previas -contains $s)) { $elegidas += $s }
 }
 $tarea = 'no'
 if ($elegidas -contains 'proyecto-expediente') {
@@ -132,20 +137,25 @@ foreach ($s in @($elegidas)) {
     }
 }
 
-# Quien mantiene las skills (tiene las originales desde su cuenta de claude.ai) puede publicar sus cambios para los demas
-$publicar = Ajuste 'PublicarSkills' 'no'
-$originales = Get-ChildItem $sincronizadas -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'proyecto-expediente\SKILL.md') } | Select-Object -First 1
-if ($originales) {
-    Write-Host '  Tienes las skills originales del paquete en tu cuenta de claude.ai.'
-    $publicar = if (SiNo '    ¿Publicar automaticamente tus cambios en ellas para los demas (al arrancar PL/SQL Developer)?' ($publicar -eq 'si')) { 'si' } else { 'no' }
+Write-Host '  Al arrancar PL/SQL Developer se pueden bajar solas las versiones nuevas del plug-in y de las skills elegidas.'
+$recibir = if (SiNo '    ¿Recibir actualizaciones automaticas?' ((Ajuste 'ActualizacionesAutomaticas' 'si') -ne 'no')) { 'si' } else { 'no' }
+
+# Publicar las skills solo lo activa quien las mantiene, con -Publicar; si ya lo tenia, se respeta
+$publicarSkills = if ($Publicar) { 'si' } else { Ajuste 'PublicarSkills' 'no' }
+if ($Publicar) {
+    $originales = Get-ChildItem $sincronizadas -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'proyecto-expediente\SKILL.md') } | Select-Object -First 1
+    if ($originales) { Bien 'Tus cambios en las skills del paquete se publicaran para los demas al arrancar PL/SQL Developer.' }
+    else { Ojo 'Con -Publicar, pero no encuentro las skills originales (proyecto-expediente, a18-acta-entrega, manual-desarrollo) en tu cuenta: no habra nada que publicar.' }
 }
 
 # ============================================================================== 3. instalar
 Titulo '3. Instalando'
 New-Item -ItemType Directory -Force -Path $dirPlugin | Out-Null
 # Los ajustes de actualizacion van en su seccion de ClaudeCode.ini; el resto del fichero no se toca
-$lineas = if (Test-Path $ini) { [System.Collections.Generic.List[string]]([System.IO.File]::ReadAllLines($ini, $utf8)) } else { [System.Collections.Generic.List[string]]::new() }
-$nuevos = [ordered]@{ DllInstalada = $dll; Skills = ($elegidas -join ','); TareaProgramada = $tarea; PublicarSkills = $publicar }
+# Lista que admite añadir líneas (un if que devuelve la lista la convertiría en un array de tamaño fijo)
+$lineas = New-Object 'System.Collections.Generic.List[string]'
+if (Test-Path $ini) { $lineas.AddRange([System.IO.File]::ReadAllLines($ini, $utf8)) }
+$nuevos = [ordered]@{ DllInstalada = $dll; Skills = ($elegidas -join ','); TareaProgramada = $tarea; ActualizacionesAutomaticas = $recibir; PublicarSkills = $publicarSkills }
 foreach ($k in $nuevos.Keys) {
     $i = -1; for ($j = 0; $j -lt $lineas.Count; $j++) { if ($lineas[$j] -match "^\s*$k\s*=") { $i = $j; break } }
     if ($i -ge 0) { $lineas[$i] = "$k=$($nuevos[$k])" }
@@ -153,11 +163,15 @@ foreach ($k in $nuevos.Keys) {
         $s = $lineas.IndexOf('[Actualizaciones]')
         if ($s -lt 0) {
             $lineas.Add(''); $lineas.Add('[Actualizaciones]')
-            $lineas.Add('; Los escribe instalar.ps1 (vuelve a ejecutarlo para cambiarlos). PublicarSkills=si solo en el equipo de quien')
-            $lineas.Add('; mantiene las skills: publica sus cambios para los demas.')
+            $lineas.Add('; Los escribe instalar.ps1 (vuelve a ejecutarlo para cambiarlos). ActualizacionesAutomaticas=no deja la version')
+            $lineas.Add('; instalada. PublicarSkills=si solo en el equipo de quien mantiene las skills (instalar.ps1 -Publicar).')
             $s = $lineas.Count - 1
         }
-        $lineas.Insert($s + 1, "$k=$($nuevos[$k])")
+        # Al final de la seccion (antes de la siguiente y de las lineas en blanco que la separan)
+        $fin = $s + 1
+        while ($fin -lt $lineas.Count -and -not $lineas[$fin].StartsWith('[')) { $fin++ }
+        while ($fin -gt $s + 1 -and -not $lineas[$fin - 1].Trim()) { $fin-- }
+        $lineas.Insert($fin, "$k=$($nuevos[$k])")
     }
 }
 # Si el .ini no existia, el plug-in completa el resto con sus valores por defecto. UTF-8 con BOM, como lo crea el plug-in
@@ -173,5 +187,10 @@ foreach ($s in $elegidas) { if (Test-Path (Join-Path $skillsUsuario "$s\SKILL.md
 
 Titulo 'Listo'
 Write-Host '  Abre (o reinicia) PL/SQL Developer: tendras la pestaña Claude Code.'
-Write-Host '  A partir de ahora, cada vez que arranque PL/SQL Developer se bajan solas las versiones nuevas del plug-in y de las'
-Write-Host '  skills elegidas; la DLL nueva se aplica al reiniciarlo. Para cambiar lo elegido, vuelve a ejecutar este script.'
+if ($recibir -eq 'si') {
+    Write-Host '  A partir de ahora, cada vez que arranque PL/SQL Developer se bajan solas las versiones nuevas del plug-in y de las'
+    Write-Host '  skills elegidas; la DLL nueva se aplica al reiniciarlo.'
+} else {
+    Write-Host '  Sin actualizaciones automaticas: para pasar a una version nueva, vuelve a ejecutar este script.'
+}
+Write-Host '  Para cambiar lo elegido, vuelve a ejecutar este script.'

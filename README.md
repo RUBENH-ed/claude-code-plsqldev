@@ -105,7 +105,8 @@ Lo normal en la organización. Hace falta acceso al repositorio en GitHub y Git 
    desactiven los hooks. Después pregunta qué skills quieres (ver *Paquete de expedientes*) y deja la DLL en su sitio.
 3. Abre PL/SQL Developer.
 
-A partir de ahí, **cada vez que arranca PL/SQL Developer** el plug-in lanza en segundo plano `actualizar.ps1`: baja
+El instalador pregunta si quieres **recibir actualizaciones automáticas** (`ActualizacionesAutomaticas`). Si dices
+que sí, **cada vez que arranca PL/SQL Developer** el plug-in lanza en segundo plano `actualizar.ps1`: baja
 la última versión publicada, deja preparada la DLL nueva (se aplica al reiniciar; te avisa con un mensaje) y pone al
 día las skills que elegiste. Para cambiar lo elegido, vuelve a ejecutar `instalar.ps1`. El resultado de la última
 actualización queda en `%APPDATA%\ClaudeCodePlsql\actualizacion.json`.
@@ -123,8 +124,8 @@ actualizan solas:
 
 Las skills vienen de las de quien las mantiene: en su equipo, `herramientas\sincronizar-skills.ps1` las copia al
 repositorio (la de expedientes, en una versión sin sus datos: cada uno usa su propio panel) y las publica cuando
-cambian. Si al instalar tiene las originales, el instalador le ofrece hacerlo solo al arrancar PL/SQL Developer
-(`PublicarSkills=si`).
+cambian. Para que lo haga solo al arrancar PL/SQL Developer, ejecuta una vez el instalador con `-Publicar`
+(`PublicarSkills=si`); a los demás no se les pregunta.
 
 ## Instalar a mano (sin actualizaciones)
 

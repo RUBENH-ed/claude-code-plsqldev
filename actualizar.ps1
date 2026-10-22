@@ -65,6 +65,9 @@ function Espejo([string]$de, [string]$a) {
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) { throw "No hay copia del repositorio en ${repo}: instala el plug-in con instalar.ps1." }
 
+    # Sin actualizaciones automaticas (ActualizacionesAutomaticas=no) solo se baja al instalar
+    $recibir = $Instalando -or ((Ajuste 'ActualizacionesAutomaticas' 'si') -notmatch '^(no|n|false|0)$')
+    if ($recibir) {
     # ------------------------------------------------------------------------ 1. ultima version publicada
     Git @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', 'publicado') | Out-Null
     Git @('-C', $repo, 'reset', '-q', '--hard', 'origin/publicado') | Out-Null
@@ -116,6 +119,7 @@ try {
         $json = ConvertTo-Json -InputObject ([ordered]@{ tarea_programada = $tarea }) -Compress
         [System.IO.File]::WriteAllText((Join-Path $env:USERPROFILE '.claude\expedientes.json'), $json, $utf8)
     }
+    }   # fin de if ($recibir)
 
     # ------------------------------------------------------------------------ 4. publicar las skills (quien las mantiene)
     if ((Ajuste 'PublicarSkills' 'no') -match '^(si|sí|s|true|1)$' -and -not $Instalando) {

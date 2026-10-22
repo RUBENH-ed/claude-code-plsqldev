@@ -10,6 +10,9 @@
 - **Las BBDD conectadas son del cliente, no del expediente**: valen para todos sus desarrollos e incidencias. El
   cliente sale de la carpeta que contiene el expediente (saltando las de estado como `01.PENDIENTE INSTALAR REAL`) o
   de `CarpetaClientes` en el `.ini`. Las conectadas con la 1.6 hay que volver a conectarlas una vez.
+- **Instalador**: pregunta si quieres recibir actualizaciones automáticas (`ActualizacionesAutomaticas`); publicar las
+  skills ya no se pregunta, lo activa quien las mantiene con `instalar.ps1 -Publicar`. Corregidos el error al guardar
+  los ajustes («La colección tiene un tamaño fijo») y el nombre de la skill que faltaba en la pregunta.
 
 ## 1.6 (EDISA)
 
