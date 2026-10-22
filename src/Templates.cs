@@ -528,7 +528,7 @@ catch {
 
     /// <summary>Contrato de tipos del mod de la franja de BBDD.</summary>
     public const string ModTypes = """
-export type Conexion = { nombre: string; origen: string; tipo: 'desarrollo' | 'pruebas' | 'produccion' }
+export type Conexion = { nombre: string; origen: string; tipo: 'desarrollo' | 'pruebas' | 'produccion'; env: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -566,7 +566,10 @@ async function leer($: EngineInterface): Promise<Conexion[]> {
 
   const desarrollo = await leerJson($, `${dir}\\desarrollo.json`)
   if (desarrollo?.origen) {
-    lista.push({ nombre: String(desarrollo.nombre ?? desarrollo.origen), origen: String(desarrollo.origen), tipo: 'desarrollo' })
+    lista.push({
+      nombre: String(desarrollo.nombre ?? desarrollo.origen), origen: String(desarrollo.origen), tipo: 'desarrollo',
+      env: String(desarrollo.env ?? ''),
+    })
   }
 
   // El proyecto de esta sesión lo pone el plug-in al abrir Claude
@@ -575,11 +578,29 @@ async function leer($: EngineInterface): Promise<Conexion[]> {
     const indice = await leerJson($, `${dir}\\${proyecto}\\conexiones.json`)
     for (const c of indice?.conexiones ?? []) {
       if (c?.origen) {
-        lista.push({ nombre: String(c.nombre), origen: String(c.origen), tipo: c.tipo === 'produccion' ? 'produccion' : 'pruebas' })
+        lista.push({
+          nombre: String(c.nombre), origen: String(c.origen), tipo: c.tipo === 'produccion' ? 'produccion' : 'pruebas',
+          env: String(c.env ?? ''),
+        })
       }
     }
   }
   return lista
+}
+
+// Lo que se le dice a Claude de las BBDD (las rutas de los .env no son secretas; su contenido sí y no se lee)
+function describir(lista: Conexion[]): string {
+  const desarrollo = lista.find(c => c.tipo === 'desarrollo')
+  const otras = lista.filter(c => c.tipo !== 'desarrollo')
+  const linea = (c: Conexion) =>
+    `${c.origen} (${c.tipo === 'produccion' ? 'producción' : c.tipo}) con -EnvFile '${c.env}'`
+  return [
+    'BBDD que puedes consultar ahora mismo desde esta sesión (las conecta el usuario con los botones de PL/SQL ' +
+      'Developer; esta lista sustituye a cualquier otra que se te diera antes):',
+    `- Desarrollo, la de por defecto: ${desarrollo ? linea(desarrollo) : 'sin fijar; usa la de la skill (DESA04, sin -EnvFile)'}.`,
+    otras.length > 0 ? `- Del proyecto: ${otras.map(linea).join('; ')}.` : '- Del proyecto: ninguna.',
+    "Consulta con el query.ps1 de la skill desa04-sqlplus: & '<ruta del query.ps1>' -Sql 'SELECT ...' -EnvFile '<fichero>'.",
+  ].join('\n')
 }
 
 export const register: Register = on => {
@@ -596,6 +617,17 @@ export const register: Register = on => {
       void refrescar()
     })
     return next(e)
+  })
+
+  // Cada mensaje lleva a Claude la lista de BBDD de ese momento: los botones de PL/SQL Developer la cambian con la
+  // sesión ya abierta y lo que se le dijo al empezar deja de valer. Solo se añade cuando ha cambiado.
+  let ultima = ''
+  on('prompt.submit', async ($, e, next) => {
+    if (e.command) return next(e)
+    const texto = describir(await leer($))
+    if (texto === ultima) return next(e)
+    ultima = texto
+    return next({ ...e, context: [...(e.context ?? []), texto] })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

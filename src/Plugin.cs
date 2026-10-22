@@ -234,7 +234,10 @@ internal static unsafe class Plugin
             return;
         }
 
-        string origin = $"{user}@{db}";
+        // El lanzador de LIBRA numera el alias de cada sesión (ALIAS#1, ALIAS#2...): se guarda sin el número, para que
+        // volver a conectar la misma base la sustituya en vez de añadir otra
+        string dbName = System.Text.RegularExpressions.Regex.Replace(db, "#\\d+$", "");
+        string origin = $"{user}@{dbName}";
         Workspace ws = CurrentWorkspaceNoAsk();
         string kind = development ? "desarrollo"
             : System.Text.RegularExpressions.Regex.IsMatch(db, "PRUEB|TEST|DESA|DEV|QA|PRE",
@@ -252,7 +255,7 @@ internal static unsafe class Plugin
         WriteIfChanged(alta, Templates.AltaBbdd, new UTF8Encoding(true)); // con BOM para Windows PowerShell 5.1
         string input = "{" +
             $"\"modo\":{Json(development ? "desarrollo" : "proyecto")},\"proyecto\":{Json(ProjectId(ws))},\"ruta\":{Json(ws.Root)}," +
-            $"\"nombre\":{Json(db)},\"tipo\":{Json(kind)},\"usuario\":{Json(user)},\"clave\":{Json(password)},\"bd\":{Json(db)}," +
+            $"\"nombre\":{Json(dbName)},\"tipo\":{Json(kind)},\"usuario\":{Json(user)},\"clave\":{Json(password)},\"bd\":{Json(db)}," +
             $"\"tnsAdmin\":{Json(Environment.GetEnvironmentVariable("TNS_ADMIN") ?? "")},\"origen\":{Json(origin)}" + "}";
 
         Ide.Status($"Dando de alta para Claude la BD {origin}...");

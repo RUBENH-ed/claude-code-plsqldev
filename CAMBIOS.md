@@ -1,5 +1,13 @@
 # Cambios
 
+## 1.4.1 (EDISA)
+
+- **Claude se entera de las BBDD que conectas con su sesión ya abierta.** El mod añade a cada mensaje la lista de
+  BBDD de ese momento (desarrollo y las del proyecto, con su `-EnvFile`) cuando ha cambiado. Antes solo la recibía al
+  abrirse, y lo que se conectaba después dependía de pegar el aviso del portapapeles.
+- **El alias se guarda sin el número de sesión** que añade el lanzador de LIBRA (`ALIAS#3`): volver a conectar la
+  misma base la sustituye en vez de añadir otra.
+
 ## 1.4 (EDISA)
 
 - **BBDD para Claude, con la skill desa04-sqlplus.** Grupo nuevo *Base de datos* en la cinta (en el menú clásico,
