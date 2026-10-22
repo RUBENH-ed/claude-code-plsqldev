@@ -10,6 +10,10 @@
 - **El hook bloquea cualquier script que se conecte a Oracle por su cuenta** (mira dentro: `sqlplus`, `sql`, librerías
   de conexión), venga de una skill o de donde sea; solo vale el envoltorio del plug-in.
 - Sin BD de desarrollo fijada, Claude pide que la fijes en lugar de usar ninguna por su cuenta.
+- **Las consultas de solo lectura ya no piden aprobación**: si pasan el filtro (una sentencia `SELECT`, `WITH` o
+  `DESCRIBE` con el envoltorio), el hook las aprueba solo; todo lo demás se sigue bloqueando.
+- **Cinta**: *Abrir en Claude Code* es un botón grande con el símbolo de Claude en naranja, con *Preguntar*, *Traer
+  cambios* y *Copiar referencia* juntos a su derecha; *Configurar* lleva un engranaje.
 
 ## 1.4.1 (EDISA)
 

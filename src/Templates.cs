@@ -146,9 +146,9 @@ function Bloquear([string]$motivo) {
     exit 2
 }
 
-function Preguntar([string]$motivo) {
-    # Obliga a pedir aprobacion aunque haya reglas "allow" o se salten los permisos
-    $r = @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'ask'; permissionDecisionReason = $motivo } }
+function Permitir([string]$motivo) {
+    # Una consulta que ha pasado el filtro de solo lectura se aprueba sola, sin preguntar al usuario
+    $r = @{ hookSpecificOutput = @{ hookEventName = 'PreToolUse'; permissionDecision = 'allow'; permissionDecisionReason = $motivo } }
     [Console]::Out.Write(($r | ConvertTo-Json -Depth 4 -Compress))
     exit 0
 }
@@ -268,7 +268,7 @@ try {
             'run-sql' {
                 $sql = if ($ti.sql) { [string]$ti.sql } else { ($ti.PSObject.Properties | Where-Object { $_.Value -is [string] } | Select-Object -First 1).Value }
                 Comprobar-Select $sql
-                Preguntar 'Consulta de solo lectura: revisala antes de aprobarla.'
+                Permitir 'Consulta de solo lectura: pasa el filtro del plug-in.'
             }
             { $_ -in 'list-connections', 'connect', 'disconnect', 'schema-information' } { exit 0 }
             default { Bloquear "la herramienta '$accion' de SQLcl no esta permitida; usa run-sql con un SELECT." }
@@ -285,7 +285,7 @@ try {
         $cmd = [string]$ti.command
         if ($cmd -match '(?i)consulta-bbdd\.ps1') {
             Comprobar-Consulta $cmd
-            Preguntar 'Consulta de solo lectura: revisala antes de aprobarla.'
+            Permitir 'Consulta de solo lectura: pasa el filtro del plug-in.'
         }
         $clientes = '(^|[\s;&|(''"`/\\])(sql|sqlplus|sqlcl|sqlldr|impdp|expdp|exp|imp|rman|dgmgrl|tnsping|orapki|mkstore)(\.exe|\.cmd|\.bat)?(?=$|[\s;&|)''"`])'
         if ($cmd -match "(?i)$clientes") { Bloquear 'no se pueden lanzar clientes de Oracle desde la consola; usa el consulta-bbdd.ps1 del plug-in.' }
@@ -351,7 +351,6 @@ catch {
         string escaped = command.Replace("\\", "\\\\").Replace("\"", "\\\"");
         return "{\n" +
                "  \"permissions\": {\n" +
-               "    \"ask\": [\"mcp__sqlcl__run-sql\"],\n" +
                "    \"deny\": [\"mcp__sqlcl__run-sqlcl\"]\n" +
                "  },\n" +
                "  \"hooks\": {\n" +
@@ -805,8 +804,9 @@ export const register: Register = on => {
     /// </summary>
     public static readonly (int Index, string Nombre, string Svg)[] Iconos =
     {
+        // El símbolo de Claude, en naranja; botón grande en la cinta (retícula de 37 x 37)
         (Plugin.MenuOpen, "Abrir en Claude Code",
-            Svg("""<rect x="2.5" y="3.5" width="16" height="14" rx="2" fill="none" stroke="#434A54"/><path d="M6 8l3 2.5L6 13M10.5 13.5h4" fill="none" stroke="#434A54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>""")),
+            Svg("""<path d="M10.5 8.3L10.5 1.2M11.6 8.59L14.1 4.26M12.41 9.4L18.55 5.85M12.7 10.5L17.7 10.5M12.41 11.6L18.55 15.15M11.6 12.41L14.1 16.74M10.5 12.7L10.5 19.8M9.4 12.41L6.9 16.74M8.59 11.6L2.45 15.15M8.3 10.5L3.3 10.5M8.59 9.4L2.45 5.85M9.4 8.59L6.9 4.26" fill="none" stroke="#D97757" stroke-width="2.2" stroke-linecap="round"/>""", 37)),
         (Plugin.MenuAskSelection, "Preguntar por lo seleccionado",
             Svg("""<path d="M3.5 3.5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3v-3H3.5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" fill="none" stroke="#434A54"/><path d="M8.8 7.5a1.8 1.8 0 1 1 2.6 1.6c-.6.3-.9.7-.9 1.3" fill="none" stroke="#434A54" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.5" cy="12.3" r=".8" fill="#434A54"/>""")),
         (Plugin.MenuPull, "Traer cambios de Claude",
@@ -816,7 +816,7 @@ export const register: Register = on => {
         (Plugin.MenuFolder, "Abrir carpeta de trabajo",
             Svg("""<path d="M2.5 6v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H10L8.5 5h-5a1 1 0 0 0-1 1z" fill="none" stroke="#434A54"/>""")),
         (Plugin.MenuConfig, "Configurar",
-            Svg("""<circle cx="10.5" cy="10.5" r="3" fill="none" stroke="#434A54" stroke-width="1.5"/><path d="M10.5 2.5v3M10.5 15.5v3M2.5 10.5h3M15.5 10.5h3M4.8 4.8l2.1 2.1M14.1 14.1l2.1 2.1M4.8 16.2l2.1-2.1M14.1 6.9l2.1-2.1" stroke="#434A54" stroke-width="1.8" stroke-linecap="round"/>""")),
+            Svg("""<g fill="#434A54"><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(45 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(90 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(135 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(180 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(225 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(270 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(315 10.5 10.5)"/></g><circle cx="10.5" cy="10.5" r="4.6" fill="none" stroke="#434A54" stroke-width="2.8"/>""")),
         (Plugin.MenuConnect, "Conectar a BBDD",
             Svg("""<ellipse cx="9.5" cy="5" rx="6" ry="2.5" fill="none" stroke="#434A54"/><path d="M3.5 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M3.5 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" fill="none" stroke="#434A54"/><circle cx="16" cy="16" r="4" fill="#27AE60"/><path d="M16 13.8v4.4M13.8 16h4.4" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/>""")),
         (Plugin.MenuDisconnect, "Desconectar BBDD",
@@ -825,8 +825,9 @@ export const register: Register = on => {
             Svg("""<ellipse cx="9.5" cy="5" rx="6" ry="2.5" fill="none" stroke="#434A54"/><path d="M3.5 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M3.5 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" fill="none" stroke="#434A54"/><circle cx="16" cy="16" r="4" fill="#2F80ED"/><path d="M14 16l1.5 1.5 2.5-3" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>""")),
     };
 
-    private static string Svg(string body) =>
-        $"""<svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 21 21">{body}</svg>""";
+    /// <summary>Icono dibujado en la retícula de 21 x 21; con tamaño 37, el mismo dibujo para un botón grande.</summary>
+    private static string Svg(string body, int size = 21) =>
+        $"""<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 21 21">{body}</svg>""";
 
     public static string McpJson(string sqlclPath)
     {

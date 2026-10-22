@@ -122,7 +122,7 @@ public static unsafe class Exports
             {
                 1 => "TAB=Claude Code",
                 2 => "GROUP=Claude Code",
-                Plugin.MenuOpen => "ITEM=Abrir en Claude Code",
+                Plugin.MenuOpen => "LARGEITEM=Abrir en Claude Code", // grande: las otras tres quedan juntas a su derecha
                 Plugin.MenuAskSelection => "ITEM=Preguntar por lo seleccionado",
                 Plugin.MenuPull => "ITEM=Traer cambios de Claude",
                 Plugin.MenuCopyRef => "ITEM=Copiar referencia para Claude",
