@@ -26,7 +26,8 @@ internal static unsafe class Plugin
 {
     // Índices de menú (CreateMenuItem / OnMenuClick)
     public const int MenuOpen = 3, MenuAskSelection = 4, MenuPull = 5, MenuCopyRef = 6, MenuFolder = 8, MenuConfig = 9,
-        MenuConnect = 11, MenuDisconnect = 12, MenuSetDev = 13;
+        MenuConnect = 11, MenuDisconnect = 12, MenuSetDev = 13,
+        MenuCompare = 15, MenuReview = 16, MenuExplainError = 17, MenuDocs = 18, MenuInstall = 19;
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly Dictionary<int, Link> Links = new();
@@ -97,6 +98,11 @@ internal static unsafe class Plugin
                 case MenuConnect: ConnectDatabase(development: false); break;
                 case MenuDisconnect: DisconnectDatabases(); break;
                 case MenuSetDev: ConnectDatabase(development: true); break;
+                case MenuCompare: CompareWithDatabases(); break;
+                case MenuReview: ReviewWindow(); break;
+                case MenuExplainError: ExplainError(); break;
+                case MenuDocs: ProjectTask(Prompts.DocsTask, "Claude prepara la documentación del expediente"); break;
+                case MenuInstall: ProjectTask(Prompts.InstallTask, "Claude prepara la instalación del expediente"); break;
             }
         }
         finally
@@ -203,6 +209,83 @@ internal static unsafe class Plugin
         Process.Start(new ProcessStartInfo("notepad.exe", Quote(Config.FilePath)) { UseShellExecute = true });
     }
 
+    // ================================================================ herramientas: encargos concretos a Claude
+
+    /// <summary>Abre Claude (o le deja el encargo en el portapapeles) con la ventana activa y una tarea concreta.</summary>
+    private static void TaskWithWindow(string task, string status)
+    {
+        Link? link = ExportActiveWindow();
+        if (link == null) return;
+
+        string copy = link.Ws.Relative(link.Path);
+        string prompt = Prompts.Task(link.Ws, link.Title, copy, ConnectionText(), link.Original, task);
+        string again = Prompts.TaskAgain(link.Title, copy, ConnectionText(), task);
+        Launch(link.Ws, prompt, again, status + Where(link.Ws));
+    }
+
+    /// <summary>Botón "Comparar con otra BD": el objeto de la ventana entre desarrollo y las BBDD del proyecto.</summary>
+    private static void CompareWithDatabases()
+    {
+        var obj = Ide.WindowType == 3 ? Ide.WindowObject() : null;
+        string what = obj is { } o ? $"el objeto {o.Owner}.{o.Name} ({o.Type})" : "los objetos que usa esta ventana";
+        TaskWithWindow(
+            $"Compara {what} entre la BD de desarrollo y las BBDD conectadas en el proyecto (-Lista te dice cuáles hay): " +
+            "su fuente en ALL_SOURCE o DBA_SOURCE, o su estructura en ALL_TAB_COLUMNS si es una tabla o vista. Dime qué " +
+            "cambia, qué versión parece tener cada una y con cuál coincide mi copia. Si no hay más BBDD conectadas que la " +
+            "de desarrollo, dímelo y para. No cambies nada.",
+            "Claude compara el objeto entre BBDD");
+    }
+
+    /// <summary>Botón "Revisar normas": la ventana contra las normas de EDISA, sin tocarla.</summary>
+    private static void ReviewWindow() =>
+        TaskWithWindow(
+            "Revisa la copia antes de que la compile: normas de EDISA (joins implícitos con (+) y nunca JOIN ... ON, " +
+            "fechas con máscara, || para concatenar, nada de SELECT *, binds en el SQL dinámico, UPDATE y DELETE con " +
+            "WHERE, comentarios en español, packages estándar de LIBRA en vez de reinventar, solo caracteres de " +
+            "Windows-1252) y errores probables (variables sin usar, excepciones que se tragan, cursores sin cerrar, " +
+            "nombres de tablas o columnas que no existan: compruébalos en la BD de desarrollo). Dame una lista por " +
+            "línea con lo que cambiarías y por qué, de lo más grave a lo menos. No toques la copia hasta que te lo pida.",
+            "Claude revisa la ventana");
+
+    /// <summary>
+    /// Botón "Explicar error": si hay texto en el portapapeles (el error copiado de PL/SQL Developer) se lo pasa en un
+    /// fichero, porque un mensaje con comillas dobles no llega bien a claude.exe; si no, que lo busque en ALL_ERRORS.
+    /// </summary>
+    private static void ExplainError()
+    {
+        string clip = Win32.GetClipboardText().Trim();
+        string task;
+        if (clip.Length > 0 && clip.Length < 20_000)
+        {
+            Workspace ws = CurrentWorkspaceNoAsk();
+            EnsureWorkspace(ws);
+            string file = System.IO.Path.Combine(ws.InternalDir, $"error-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+            File.WriteAllText(file, ToCrlf(Normalize(clip)) + "\r\n", Utf8NoBom);
+            task = $"Te dejo en {ws.Relative(file)} el error que me ha dado (copiado de PL/SQL Developer). ";
+        }
+        else
+        {
+            task = "Me ha dado un error al compilar o ejecutar esto. Búscalo en ALL_ERRORS del objeto, en la BD donde " +
+                   "lo he compilado si está conectada, o pídeme el mensaje. ";
+        }
+        TaskWithWindow(task + "Explícame la causa con la línea donde está y cómo lo arreglarías en la copia. " +
+                       "No cambies nada hasta que te lo diga.", "Claude explica el error");
+    }
+
+    /// <summary>Encargo sobre el expediente de la ventana activa (documentación, instalación).</summary>
+    private static void ProjectTask(string task, string status)
+    {
+        Workspace ws = CurrentWorkspaceNoAsk();
+        if (!ws.IsProject)
+        {
+            Win32.Message("Esta opción es para un expediente: abre una ventana de un fichero que esté dentro de la carpeta " +
+                          "del expediente («1234567 - Título») y vuelve a pulsarla.", Win32.MB_ICONINFORMATION);
+            return;
+        }
+        string prompt = Prompts.ProjectTask(ws, task);
+        Launch(ws, prompt, task, status + Where(ws));
+    }
+
     // ================================================================ bases de datos para Claude
 
     private static string BbddDir => System.IO.Path.Combine(Config.Dir, "bbdd");
@@ -282,7 +365,8 @@ internal static unsafe class Plugin
         string prompt =
             $"He conectado en este proyecto la BD {origin} ({kind}). Consúltala con & '{WriteQueryScript()}' " +
             $"-Sql 'SELECT ...' -Bd {name}; la de desarrollo sigue siendo la de por defecto. " +
-            "Compruébalo con SELECT USER FROM dual.";
+            "Compruébalo con SELECT USER FROM dual. Si el expediente tiene fuentes (cfstd, cfcliente), mira además si los " +
+            "objetos que tocan existen en esa BD y si su versión difiere de la de desarrollo, y avísame de lo que cambie.";
         Launch(ws, prompt, prompt, $"BD {origin} disponible para Claude en este proyecto");
     }
 

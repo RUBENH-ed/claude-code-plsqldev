@@ -114,6 +114,11 @@ public static unsafe class Exports
                     Plugin.MenuConnect => m + "Conectar a &BBDD",
                     Plugin.MenuDisconnect => m + "&Desconectar BBDD",
                     Plugin.MenuSetDev => m + "Fijar como BD de d&esarrollo",
+                    Plugin.MenuCompare => m + "Co&mparar con otra BD",
+                    Plugin.MenuReview => m + "&Revisar normas",
+                    Plugin.MenuExplainError => m + "E&xplicar error",
+                    Plugin.MenuDocs => m + "Documentación del e&xpediente",
+                    Plugin.MenuInstall => m + "Preparar &instalación",
                     _ => "",
                 });
             }
@@ -133,6 +138,12 @@ public static unsafe class Exports
                 Plugin.MenuConnect => "ITEM=Conectar a BBDD",
                 Plugin.MenuDisconnect => "ITEM=Desconectar BBDD",
                 Plugin.MenuSetDev => "ITEM=Fijar como BD de desarrollo",
+                14 => "GROUP=Herramientas",
+                Plugin.MenuCompare => "ITEM=Comparar con otra BD",
+                Plugin.MenuReview => "ITEM=Revisar normas",
+                Plugin.MenuExplainError => "ITEM=Explicar error",
+                Plugin.MenuDocs => "ITEM=Documentación",
+                Plugin.MenuInstall => "ITEM=Preparar instalación",
                 _ => "",
             });
         }

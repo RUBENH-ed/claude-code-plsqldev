@@ -117,6 +117,40 @@ internal static class Prompts
         return sb.ToString();
     }
 
+    /// <summary>Encargo concreto sobre la ventana (botones de Herramientas): como Open, pero con la tarea al final.</summary>
+    public static string Task(Workspace ws, string title, string copy, string connection, string? original, string task)
+    {
+        var sb = Start(ws, title, connection);
+        sb.Append($" Su texto está en {copy}, una copia UTF-8: si te pido cambios, edita esa copia y nada más.");
+        sb.Append(OriginalText(original));
+        sb.Append(End(ws));
+        sb.Append(' ').Append(task);
+        return sb.ToString();
+    }
+
+    /// <summary>El mismo encargo para pegar en una ventana de Claude que ya estaba abierta.</summary>
+    public static string TaskAgain(string title, string copy, string connection, string task) =>
+        $"Sigo en PL/SQL Developer con la ventana {title}{connection}. Su copia está en @{copy.Replace('\\', '/')} " +
+        $"(actualizada ahora). {task}";
+
+    /// <summary>Botón "Documentación": acta de entrega y manual del expediente.</summary>
+    public const string DocsTask =
+        "Prepara la documentación de entrega de este expediente: el acta de entrega (A18) y el manual de desarrollo, " +
+        "con las skills a18-acta-entrega y manual-desarrollo si las tienes (si no, dime qué falta y para). Sácalo de la " +
+        "carpeta del expediente (doc, cfstd, cfcliente, instalacion) y pregúntame lo que no esté ahí; no inventes " +
+        "programas, tablas ni fechas.";
+
+    /// <summary>Botón "Preparar instalación": script de instalación con los fuentes del expediente.</summary>
+    public const string InstallTask =
+        "Prepara en instalacion/ la instalación de este expediente con los fuentes de cfstd y cfcliente: qué objetos " +
+        "lleva y en qué orden se compilan según sus dependencias (tablas y DDL, vistas, especificaciones, cuerpos, " +
+        "disparadores, datos). Enséñame antes la lista y el orden. Después escribe el script como un .sql nuevo en " +
+        "Windows-1252, con CRLF y sin BOM, sin tocar los fuentes originales.";
+
+    /// <summary>Encargo sobre el expediente entero, sin una ventana concreta.</summary>
+    public static string ProjectTask(Workspace ws, string task) =>
+        $"{Marker} en el expediente {ws.Label}.{End(ws)} {task}";
+
     /// <summary>Texto para pegar en una ventana de Claude que ya estaba abierta.</summary>
     public static string Again(string title, string copy, string connection, (string Path, int Line)? selection)
     {

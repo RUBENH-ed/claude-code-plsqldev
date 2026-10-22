@@ -46,6 +46,9 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     private static partial nint SetClipboardData(uint format, nint hMem);
 
+    [LibraryImport("user32.dll")]
+    private static partial nint GetClipboardData(uint format);
+
     [LibraryImport("kernel32.dll")]
     private static partial nint GlobalAlloc(uint flags, nuint bytes);
 
@@ -101,6 +104,35 @@ internal static unsafe partial class Win32
                 return false;
             }
             return true; // a partir de aquí la memoria es del sistema
+        }
+        finally
+        {
+            CloseClipboard();
+        }
+    }
+
+    /// <summary>Texto del portapapeles, o "" si no hay texto o no se puede abrir.</summary>
+    public static string GetClipboardText()
+    {
+        bool opened = false;
+        for (int i = 0; i < 10 && !(opened = OpenClipboard(Ide.MainWindow)); i++)
+            Thread.Sleep(30);
+        if (!opened) return "";
+
+        try
+        {
+            nint h = GetClipboardData(CF_UNICODETEXT);
+            if (h == 0) return "";
+            char* src = (char*)GlobalLock(h);
+            if (src == null) return "";
+            try
+            {
+                return new string(src); // el texto del portapapeles termina en '\0'
+            }
+            finally
+            {
+                GlobalUnlock(h);
+            }
         }
         finally
         {
