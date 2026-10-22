@@ -25,13 +25,15 @@ internal sealed class Link(Workspace ws, string path, string title)
 internal static unsafe class Plugin
 {
     // Índices de menú (CreateMenuItem / OnMenuClick)
-    public const int MenuOpen = 3, MenuAskSelection = 4, MenuPull = 5, MenuCopyRef = 6, MenuFolder = 8, MenuConfig = 9;
+    public const int MenuOpen = 3, MenuAskSelection = 4, MenuPull = 5, MenuCopyRef = 6, MenuFolder = 8, MenuConfig = 9,
+        MenuConnect = 11, MenuDisconnect = 12, MenuSetDev = 13;
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly Dictionary<int, Link> Links = new();
     private static nuint _timer;
     private static bool _busy;
     private static bool _popupsCreated;
+    private static bool _iconsCreated;
 
     // Ventana de Claude recién lanzada que hay que colocar como panel en cuanto aparezca
     private static string _placeTitle = "";
@@ -55,6 +57,12 @@ internal static unsafe class Plugin
                 Ide.AddPopup(MenuPull, "Claude: traer cambios", window);
             }
             _popupsCreated = true;
+        }
+
+        if (!_iconsCreated)
+        {
+            CreateIcons();
+            _iconsCreated = true;
         }
 
         if (_timer == 0)
@@ -86,6 +94,9 @@ internal static unsafe class Plugin
                 case MenuCopyRef: CopyReference(); break;
                 case MenuFolder: OpenFolder(); break;
                 case MenuConfig: OpenConfig(); break;
+                case MenuConnect: ConnectDatabase(development: false); break;
+                case MenuDisconnect: DisconnectDatabases(); break;
+                case MenuSetDev: ConnectDatabase(development: true); break;
             }
         }
         finally
@@ -190,6 +201,232 @@ internal static unsafe class Plugin
     {
         Config.EnsureFile();
         Process.Start(new ProcessStartInfo("notepad.exe", Quote(Config.FilePath)) { UseShellExecute = true });
+    }
+
+    // ================================================================ bases de datos para Claude
+
+    private static string BbddDir => System.IO.Path.Combine(Config.Dir, "bbdd");
+
+    /// <summary>Identificador de una carpeta de trabajo para sus BBDD: 12 caracteres hexadecimales de su ruta.</summary>
+    private static string ProjectId(Workspace ws)
+    {
+        string root = System.IO.Path.GetFullPath(ws.Root).TrimEnd('\\', '/').ToLowerInvariant();
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(root)))[..12].ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Botones "Conectar a BBDD" (la sesión activa, solo para el proyecto de la ventana) y "Fijar como BD de
+    /// desarrollo" (la de todos los proyectos). Escriben el .env que usa el query.ps1 de la skill desa04-sqlplus en
+    /// %APPDATA%\ClaudeCodePlsql\bbdd, nunca en la carpeta del expediente. Claude no ve la contraseña.
+    /// </summary>
+    private static void ConnectDatabase(bool development)
+    {
+        (string user, string password, string db) = Ide.ConnectionWithPassword();
+        if (user.Length == 0 || db.Length == 0)
+        {
+            Win32.Message("PL/SQL Developer no está conectado a ninguna base de datos.", Win32.MB_ICONINFORMATION);
+            return;
+        }
+        if (password.Length == 0)
+        {
+            Win32.Message("No he podido leer la contraseña de la sesión activa, así que no puedo darla de alta para Claude.",
+                Win32.MB_ICONWARNING);
+            return;
+        }
+
+        string origin = $"{user}@{db}";
+        Workspace ws = CurrentWorkspaceNoAsk();
+        string kind = development ? "desarrollo"
+            : System.Text.RegularExpressions.Regex.IsMatch(db, "PRUEB|TEST|DESA|DEV|QA|PRE",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase) ? "pruebas" : "produccion";
+        if (kind == "produccion" &&
+            Win32.Message($"{origin} no parece una base de pruebas ni de desarrollo.\n\n" +
+                          "Si es de producción, Claude podrá consultarla (solo lectura y con tu aprobación en cada consulta), " +
+                          "y los datos que lea saldrán de tu equipo hacia Anthropic.\n\n" +
+                          $"¿La conecto en este proyecto ({ws.Label})?",
+                Win32.MB_YESNO | Win32.MB_ICONWARNING) != Win32.IDYES)
+            return;
+
+        Directory.CreateDirectory(Config.Dir);
+        string alta = System.IO.Path.Combine(Config.Dir, "alta-bbdd.ps1");
+        WriteIfChanged(alta, Templates.AltaBbdd, new UTF8Encoding(true)); // con BOM para Windows PowerShell 5.1
+        string input = "{" +
+            $"\"modo\":{Json(development ? "desarrollo" : "proyecto")},\"proyecto\":{Json(ProjectId(ws))},\"ruta\":{Json(ws.Root)}," +
+            $"\"nombre\":{Json(db)},\"tipo\":{Json(kind)},\"usuario\":{Json(user)},\"clave\":{Json(password)},\"bd\":{Json(db)}," +
+            $"\"tnsAdmin\":{Json(Environment.GetEnvironmentVariable("TNS_ADMIN") ?? "")},\"origen\":{Json(origin)}" + "}";
+
+        Ide.Status($"Dando de alta para Claude la BD {origin}...");
+        (int exit, string output, string error) = RunPowerShell(alta, input);
+        if (exit != 0)
+        {
+            Log.Info($"Alta de la BD {origin} para Claude: {error}");
+            Win32.Message($"No he podido dar de alta la BD {origin} para Claude:\n\n{error}", Win32.MB_ICONWARNING);
+            return;
+        }
+        string envFile = output.StartsWith("OK ") ? output[3..].Trim() : "";
+        Log.Info($"BD {origin} dada de alta para Claude ({kind}).");
+
+        if (development)
+        {
+            Win32.Message($"{origin} queda como BD de desarrollo: Claude la consulta por defecto en todas las sesiones que " +
+                          "abras desde PL/SQL Developer (en las que ya están abiertas, la franja de BBDD se actualiza sola).",
+                Win32.MB_ICONINFORMATION);
+            return;
+        }
+
+        // Sin comillas dobles: Windows PowerShell 5.1 las rompe al pasar el mensaje a claude.exe
+        string prompt =
+            $"He conectado en este proyecto la BD {origin} ({kind}). Consúltala con el query.ps1 de la skill " +
+            $"desa04-sqlplus y -EnvFile '{envFile}'; la de desarrollo sigue siendo la de por defecto. " +
+            "Compruébalo con SELECT USER FROM dual.";
+        Launch(ws, prompt, prompt, $"BD {origin} disponible para Claude en este proyecto");
+    }
+
+    /// <summary>Botón "Desconectar BBDD": borra las BBDD del proyecto de la ventana (la de desarrollo se queda).</summary>
+    private static void DisconnectDatabases()
+    {
+        Workspace ws = CurrentWorkspaceNoAsk();
+        string dir = System.IO.Path.Combine(BbddDir, ProjectId(ws));
+        if (!Directory.Exists(dir))
+        {
+            Win32.Message($"No hay BBDD conectadas en este proyecto ({ws.Label}): Claude solo tiene la de desarrollo.",
+                Win32.MB_ICONINFORMATION);
+            return;
+        }
+        Directory.Delete(dir, recursive: true);
+        Log.Info($"BBDD de {ws.Root} desconectadas.");
+
+        if (Config.SidePanel && Win32.FindTopWindow(ClaudeTitle(ws)) != 0)
+        {
+            const string prompt = "He desconectado las BBDD de este proyecto: ya solo tienes la de desarrollo.";
+            Launch(ws, prompt, prompt, "BBDD del proyecto desconectadas");
+        }
+        else
+        {
+            Ide.Status("BBDD del proyecto desconectadas: Claude solo tiene la de desarrollo.");
+        }
+    }
+
+    /// <summary>Texto para Claude con las BBDD que puede consultar desde esta carpeta (sin comillas dobles).</summary>
+    private static string DatabaseSummary(Workspace ws)
+    {
+        (string Origin, string Env)? dev = null;
+        var project = new List<(string Origin, string Env, string Kind)>();
+        try
+        {
+            string devFile = System.IO.Path.Combine(BbddDir, "desarrollo.json");
+            if (File.Exists(devFile))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(devFile));
+                dev = (Prop(doc.RootElement, "origen"), Prop(doc.RootElement, "env"));
+            }
+            string index = System.IO.Path.Combine(BbddDir, ProjectId(ws), "conexiones.json");
+            if (File.Exists(index))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(index));
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("conexiones", out var list) && list.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var c in list.EnumerateArray())
+                        project.Add((Prop(c, "origen"), Prop(c, "env"), Prop(c, "tipo")));
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error(e);
+        }
+
+        var sb = new StringBuilder();
+        sb.Append(dev is { } d
+            ? $"BD de desarrollo, la de por defecto: {d.Origin}, con -EnvFile '{d.Env}'. "
+            : "Todavía no hay BD de desarrollo fijada: usa la de la skill (DESA04, sin -EnvFile) y avisa al usuario de que " +
+              "la fije con el botón Fijar como BD de desarrollo. ");
+        if (project.Count == 0)
+        {
+            sb.Append("En este proyecto no hay más BBDD conectadas.");
+        }
+        else
+        {
+            sb.Append("BBDD conectadas en este proyecto: ");
+            sb.Append(string.Join("; ", project.Select(c => $"{c.Origin} ({c.Kind}) con -EnvFile '{c.Env}'")));
+            sb.Append('.');
+        }
+        return sb.ToString().Replace("\"", "'");
+    }
+
+    private static string Prop(System.Text.Json.JsonElement e, string name) =>
+        e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(name, out var v) ? v.ToString() : "";
+
+    /// <summary>Escribe (si ha cambiado) el mod de la franja de BBDD y devuelve su carpeta, para --plugin-dir.</summary>
+    private static string WriteMod()
+    {
+        string dir = System.IO.Path.Combine(Config.Dir, "mod-bbdd");
+        Directory.CreateDirectory(System.IO.Path.Combine(dir, ".claude-plugin"));
+        Directory.CreateDirectory(System.IO.Path.Combine(dir, "hooks"));
+        Directory.CreateDirectory(System.IO.Path.Combine(dir, "types"));
+        WriteIfChanged(System.IO.Path.Combine(dir, ".claude-plugin", "plugin.json"), Templates.ModPluginJson, Utf8NoBom);
+        WriteIfChanged(System.IO.Path.Combine(dir, "hooks", "hooks.json"), Templates.ModHooksJson, Utf8NoBom);
+        WriteIfChanged(System.IO.Path.Combine(dir, "hooks", "register.tsx"), Templates.ModRegister, Utf8NoBom);
+        WriteIfChanged(System.IO.Path.Combine(dir, "types", "index.d.ts"), Templates.ModTypes, Utf8NoBom);
+        return dir;
+    }
+
+    /// <summary>Iconos de la cinta: PL/SQL Developer los asigna con IDE_CreateToolButton al índice de cada opción.</summary>
+    private static void CreateIcons()
+    {
+        try
+        {
+            string dir = System.IO.Path.Combine(Config.Dir, "iconos");
+            Directory.CreateDirectory(dir);
+            foreach ((int index, string name, string svg) in Templates.Iconos)
+            {
+                string file = System.IO.Path.Combine(dir, $"{index}.svg");
+                WriteIfChanged(file, svg, Utf8NoBom);
+                Ide.CreateToolButton(index, name, file);
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error(e);
+        }
+    }
+
+    /// <summary>Lanza un script de PowerShell sin ventana, le pasa el texto por stdin y espera (como mucho un minuto).</summary>
+    private static (int Exit, string Output, string Error) RunPowerShell(string script, string input)
+    {
+        var psi = new ProcessStartInfo("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File {Quote(script)}")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = Utf8NoBom,
+        };
+        using Process proc = Process.Start(psi)!;
+        proc.StandardInput.Write(input);
+        proc.StandardInput.Close();
+        string output = proc.StandardOutput.ReadToEnd();
+        string error = proc.StandardError.ReadToEnd().Trim();
+        if (!proc.WaitForExit(60_000))
+        {
+            try { proc.Kill(); } catch { }
+            return (-1, output, "PowerShell no ha terminado en un minuto.");
+        }
+        return (proc.ExitCode, output.Trim(), error);
+    }
+
+    private static string Json(string s)
+    {
+        var sb = new StringBuilder("\"");
+        foreach (char ch in s)
+        {
+            if (ch is '"' or '\\') sb.Append('\\').Append(ch);
+            else if (ch < ' ') sb.Append("\\u").Append(((int)ch).ToString("x4"));
+            else sb.Append(ch);
+        }
+        return sb.Append('"').ToString();
     }
 
     // ================================================================ carpeta de trabajo de cada ventana
@@ -506,7 +743,9 @@ internal static unsafe class Plugin
         options.Add("--settings");
         options.Add(PsQuote(settingsFile));
         options.Add("--append-system-prompt");
-        options.Add(PsQuote(Templates.ReglaSoloConsultas));
+        options.Add(PsQuote(Templates.ReglaBaseDatos(DatabaseSummary(ws))));
+        options.Add("--plugin-dir");
+        options.Add(PsQuote(WriteMod()));
 
         if (Config.SqlclPath.Length > 0)
         {
@@ -523,6 +762,7 @@ internal static unsafe class Plugin
         ps.AppendLine("try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}");
         ps.AppendLine($"$Host.UI.RawUI.WindowTitle = {PsQuote(title)}");
         ps.AppendLine("$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1'  # que Claude no cambie el título: el plug-in busca la ventana por él");
+        ps.AppendLine($"$env:CLAUDE_PLSQL_PROYECTO = '{ProjectId(ws)}'  # BBDD conectadas en esta carpeta (lo leen el hook y el mod)");
         ps.AppendLine($"Set-Location -LiteralPath {PsQuote(ws.Root)}");
         ps.AppendLine($"$prompt = Get-Content -LiteralPath {PsQuote(promptFile)} -Raw -Encoding UTF8");
         ps.AppendLine($"Remove-Item -LiteralPath {PsQuote(promptFile)}, {PsQuote(script)} -ErrorAction SilentlyContinue");
