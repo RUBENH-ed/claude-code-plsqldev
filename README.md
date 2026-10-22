@@ -26,6 +26,9 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
 | **Copiar referencia para Claude** | Actualiza el fichero y copia `@ventanas/OBJETO.pkb` al portapapeles para pegarlo en una sesión que ya tengas abierta. |
 | **Abrir carpeta de trabajo** | Abre la carpeta en el Explorador. |
 | **Configurar** | Abre `ClaudeCode.ini` en el Bloc de notas. |
+| **Conectar a BBDD** | Deja que Claude consulte la BD de la sesión activa, solo en el proyecto de esa ventana (ver *Consultas de Claude a la base de datos*). |
+| **Desconectar BBDD** | Quita las BBDD conectadas en el proyecto de la ventana; la de desarrollo se queda. |
+| **Fijar como BD de desarrollo** | Hace de la sesión activa la BD que Claude consulta por defecto en todos los proyectos. |
 
 ### Cómo funciona
 
@@ -45,7 +48,8 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
    caracteres que no existen en Windows-1252 (flechas, ≤, emojis…), no lo carga y te dice cuáles y en qué línea.
 4. Tú revisas, compilas y guardas en PL/SQL Developer: el fichero original conserva su codificación.
 
-Nunca se lee ni se guarda la contraseña de la conexión: a Claude solo se le dice `usuario@base_de_datos`.
+A Claude solo se le dice `usuario@base_de_datos`, nunca la contraseña. El plug-in solo la lee con los botones de
+base de datos, que la guardan en un `.env` de tu perfil local (ver más abajo).
 
 ## Requisitos
 
@@ -121,6 +125,28 @@ lanzar consultas:
 **Guarda en SQLcl solo conexiones de desarrollo, nunca de producción**: Claude puede conectarse a cualquier
 conexión guardada y ejecutar SQL real. Los `CLAUDE.md` le dicen que solo consulte y que no lance DDL ni DML sin
 que se lo pidas, pero eso no es una barrera de seguridad.
+
+## Consultas de Claude a la base de datos
+
+Claude consulta con el `query.ps1` de la skill `desa04-sqlplus`, cada base con su `.env`
+(`-EnvFile`). Los `.env` los escribe el plug-in en `%APPDATA%\ClaudeCodePlsql\bbdd`, en tu perfil local y nunca en
+la carpeta del expediente.
+
+- **Desarrollo, siempre conectada.** **Fijar como BD de desarrollo** guarda la sesión activa (por ejemplo LATEST 19C)
+  como la base que Claude usa por defecto en todos los proyectos. Mientras no la fijes, usa la de la skill (DESA04).
+- **Otras, solo en su proyecto.** **Conectar a BBDD** añade la sesión activa al proyecto de esa ventana (pruebas o
+  producción, para comparar datos o versiones), junto a las que ya tuviera; si el alias no parece de pruebas o
+  desarrollo, pide confirmación. Cada sesión de Claude que abre el plug-in sabe de qué proyecto es
+  (`CLAUDE_PLSQL_PROYECTO`) y el hook no le deja usar las BBDD de otro. **Desconectar BBDD** las quita.
+- **Solo consultas.** El hook `solo-consultas.ps1` solo deja pasar un `SELECT`, `WITH` o `DESCRIBE` por llamada, te
+  pide aprobación en cada una e impide que Claude lea los `.env`. No es una garantía total: una función con
+  `PRAGMA AUTONOMOUS_TRANSACTION` escribe aunque se llame desde un `SELECT`, y eso el filtro no lo ve.
+- **A qué BBDD está conectado.** Un mod de Claude Code (`%APPDATA%\ClaudeCodePlsql\mod-bbdd`, cargado con
+  `--plugin-dir`) pinta encima del cuadro de escritura la de desarrollo y las del proyecto, en rojo las de producción.
+- **Las contraseñas van en texto plano** en los `.env`, como los de la skill. Las sesiones de Claude que no abre el
+  plug-in no tienen el hook, así que ahí nada impide leerlos.
+- **Requisitos.** La skill `desa04-sqlplus` y el cliente de Oracle con `sqlplus`. La base tiene que definirse con
+  servicio (`SERVICE_NAME`): el `query.ps1` conecta por EZConnect.
 
 ## Si algo no funciona
 
