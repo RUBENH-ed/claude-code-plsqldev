@@ -136,11 +136,10 @@ plug-in.
     public const string HookSoloConsultas = """
 # Hook PreToolUse del plug-in "Claude Code para PL/SQL Developer" (lo escribe el plug-in en cada arranque).
 # Norma: desde el plug-in, contra la base de datos solo se consulta (SELECT/WITH/DESCRIBE). Todo lo demas se bloquea.
-# Las BBDD se consultan con el query.ps1 de la skill desa04-sqlplus: la de desarrollo (para todos los proyectos) y
-# las que se conectaron con el boton "Conectar a BBDD" en ESTE proyecto (CLAUDE_PLSQL_PROYECTO, que pone el plug-in).
+# Las BBDD se consultan con el envoltorio del plug-in, consulta-bbdd.ps1: la de desarrollo (para todos los proyectos)
+# y las que se conectaron con el boton "Conectar a BBDD" en el proyecto de esta sesion.
 # Salida 2 = bloquear (el motivo va por stderr a Claude). Ante cualquier error, bloquea.
 $ErrorActionPreference = 'Stop'
-$dirBbdd = Join-Path $env:APPDATA 'ClaudeCodePlsql\bbdd'
 
 function Bloquear([string]$motivo) {
     [Console]::Error.WriteLine("Bloqueado por el plug-in de PL/SQL Developer (solo consultas): $motivo")
@@ -190,95 +189,66 @@ function Valor-Argumento([string]$v) {
     return [regex]::Replace($v, '(?i)\$env:(USERPROFILE|APPDATA|LOCALAPPDATA|TEMP)\b', { param($x) [Environment]::GetEnvironmentVariable($x.Groups[1].Value) })
 }
 
-# El .env tiene que ser el de desarrollo o uno de las BBDD conectadas en este proyecto
-function Comprobar-EnvFile([string]$ruta) {
-    $completa = [System.IO.Path]::GetFullPath($ruta)
-    $desarrollo = [System.IO.Path]::GetFullPath((Join-Path $dirBbdd 'desarrollo.env'))
-    if ($completa -ieq $desarrollo) { return }
-    $proyecto = $env:CLAUDE_PLSQL_PROYECTO
-    if ($proyecto -match '^[0-9a-f]{12}$') {
-        $dirProyecto = [System.IO.Path]::GetFullPath((Join-Path $dirBbdd $proyecto)) + '\'
-        if ($completa.StartsWith($dirProyecto, [StringComparison]::OrdinalIgnoreCase) -and $completa -match '(?i)\.env$' -and
-            -not $completa.Substring($dirProyecto.Length).Contains('\')) { return }
-    }
-    Bloquear "esa BD no esta conectada en este proyecto ($ruta). Usa la de desarrollo o pide al usuario que pulse Conectar a BBDD."
-}
-
-# Llamada al query.ps1 de la skill desa04-sqlplus:
-#   & '<ruta>\desa04-sqlplus\scripts\query.ps1' -Sql 'SELECT ...' [-EnvFile '<.env>'] [-MaxLines n]
-function Comprobar-Query([string]$cmd) {
+# Llamada al envoltorio del plug-in:
+#   & '<ruta>\ClaudeCodePlsql\consulta-bbdd.ps1' -Sql 'SELECT ...' [-Bd <nombre>] [-MaxLines n]
+#   & '<ruta>\ClaudeCodePlsql\consulta-bbdd.ps1' -File <consulta.sql> [-Bd <nombre>]  /  ... -Lista
+# Que la BD sea de este proyecto lo comprueba el propio envoltorio.
+function Comprobar-Consulta([string]$cmd) {
     $c = $cmd.Trim()
     $arg = '(?:''(?:[^'']|'''')*''|"[^"`]*"|[^\s''"`;|&<>(){}]+)'
     $m = [regex]::Match($c, "^(?:&\s*|(?:pwsh|powershell)(?:\.exe)?(?:\s+-(?:NoProfile|NonInteractive|NoLogo|ExecutionPolicy\s+Bypass))*\s+-File\s+)(?<ruta>$arg)(?<resto>.*)$", 'Singleline')
     if (-not $m.Success) {
-        Bloquear "llama al envoltorio asi: & '<ruta>\query.ps1' -Sql 'SELECT ...' [-EnvFile '<fichero .env>'] [-MaxLines n], sin nada mas en la linea."
+        Bloquear "llama al envoltorio asi: & '<ruta>\consulta-bbdd.ps1' -Sql 'SELECT ...' [-Bd <nombre>] [-MaxLines n], sin nada mas en la linea."
     }
     $script = Valor-Argumento $m.Groups['ruta'].Value
-    if ($script -notmatch '(?i)[\\/]\.claude[\\/]skills[\\/](.+[\\/])?desa04-sqlplus[\\/]scripts[\\/]query\.ps1$') {
-        Bloquear 'solo se admite el query.ps1 de la skill desa04-sqlplus.'
-    }
+    if ($script -notmatch '(?i)[\\/]ClaudeCodePlsql[\\/]consulta-bbdd\.ps1$') { Bloquear 'solo se admite el consulta-bbdd.ps1 del plug-in.' }
     $resto = $m.Groups['resto'].Value
-    $sql = $null; $fichero = $null; $envFile = $null; $diagnostico = $false
-    $p = [regex]::Match($resto, "\G\s+-(?:(?<n>Sql|File|EnvFile|MaxLines)\s+(?<v>$arg)|(?<s>Diagnostico|MostrarScript))(?=\s|$)", 'IgnoreCase')
+    $sql = $null; $fichero = $null; $lista = $false
+    $p = [regex]::Match($resto, "\G\s+-(?:(?<n>Sql|File|Bd|MaxLines)\s+(?<v>$arg)|(?<s>Lista))(?=\s|$)", 'IgnoreCase')
     $pos = 0
     while ($p.Success -and $p.Index -eq $pos) {
         $pos = $p.Index + $p.Length
-        if ($p.Groups['s'].Success) { if ($p.Groups['s'].Value -ieq 'Diagnostico') { $diagnostico = $true } }
+        if ($p.Groups['s'].Success) { $lista = $true }
         else {
             $v = Valor-Argumento $p.Groups['v'].Value
             switch ($p.Groups['n'].Value) {
                 'Sql'      { $sql = $v }
                 'File'     { $fichero = $v }
-                'EnvFile'  { $envFile = $v }
+                'Bd'       { if ($v -notmatch '^[A-Za-z0-9_]+$') { Bloquear '-Bd tiene que ser el nombre de una BD conectada (letras, numeros y _).' } }
                 'MaxLines' { if ($v -notmatch '^\d+$') { Bloquear '-MaxLines tiene que ser un numero.' } }
             }
         }
         $p = $p.NextMatch()
     }
-    if ($resto.Substring($pos).Trim()) { Bloquear "argumentos no permitidos en la llamada a query.ps1: '$($resto.Substring($pos).Trim())'." }
-    if ($envFile) { Comprobar-EnvFile $envFile }
+    if ($resto.Substring($pos).Trim()) { Bloquear "argumentos no permitidos en la llamada a consulta-bbdd.ps1: '$($resto.Substring($pos).Trim())'." }
     if ($sql -and $fichero) { Bloquear 'usa -Sql o -File, no los dos.' }
     if ($fichero) {
         if (-not (Test-Path -LiteralPath $fichero -PathType Leaf)) { Bloquear "no existe el fichero $fichero." }
         $sql = Get-Content -LiteralPath $fichero -Raw -Encoding Default
     }
     if ($sql) { Comprobar-Select $sql }
-    elseif (-not $diagnostico) { Bloquear 'falta la consulta (-Sql o -File).' }
+    elseif (-not $lista) { Bloquear 'falta la consulta (-Sql o -File).' }
 }
 
-# Llamada a consulta.ps1 de la skill oracle-desas (BBDD de desarrollo con usuarios _RO):
-#   "SELECT ..." | powershell -NoProfile -ExecutionPolicy Bypass -File <ruta>\consulta.ps1 [-Bd base] [-Formato texto]
-function Comprobar-Envoltorio([string]$cmd) {
-    $c = $cmd.Trim()
-    $sql = $null
-    $m = [regex]::Match($c, "^@'\r?\n(?<sql>.*?)\r?\n'@\s*\|(?<resto>.*)$", 'Singleline')
-    if ($m.Success) { $sql = $m.Groups['sql'].Value }
-    if (-not $m.Success) {
-        $m = [regex]::Match($c, "^'(?<sql>(?:[^']|'')*)'\s*\|(?<resto>.*)$", 'Singleline')
-        if ($m.Success) { $sql = $m.Groups['sql'].Value.Replace("''", "'") }
+# Scripts que se ejecutan desde la consola: si por dentro se conectan a Oracle (sqlplus, sql de SQLcl, librerias de
+# conexion), se bloquean, vengan de una skill, de un plugin o de donde sea. Solo vale el envoltorio del plug-in.
+$accesoBbdd = '(?i)\bsqlplus\b|\bsqlcl\b|\bsql(\.exe)?\s+[-/]|\bsql\.exe\b|\bsqlldr\b|\bmkstore\b|oracledb|cx_Oracle|Oracle\.ManagedDataAccess|OracleClient|jdbc:oracle'
+function Comprobar-Scripts([string]$cmd) {
+    $tokens = [regex]::Matches($cmd, '(?i)(''[^'']+\.(ps1|psm1|py|cmd|bat|js|sh|vbs)''|"[^"]+\.(ps1|psm1|py|cmd|bat|js|sh|vbs)"|[^\s''"`;|&<>(){}]+\.(ps1|psm1|py|cmd|bat|js|sh|vbs))(?=$|[\s;|&)''"])')
+    foreach ($t in $tokens) {
+        $ruta = $t.Value.Trim("'", '"')
+        $ruta = [regex]::Replace($ruta, '(?i)\$env:(USERPROFILE|APPDATA|LOCALAPPDATA|TEMP)\b', { param($x) [Environment]::GetEnvironmentVariable($x.Groups[1].Value) })
+        $ruta = [regex]::Replace($ruta, '^~(?=[\\/])', [Environment]::GetFolderPath('UserProfile'))
+        if ($ruta -match '[$`]') { continue }
+        try { if (-not (Test-Path -LiteralPath $ruta -PathType Leaf)) { continue } } catch { continue }
+        if ((Get-Item -LiteralPath $ruta).Length -gt 2MB) { continue }
+        if ((Get-Content -LiteralPath $ruta -Raw) -match $accesoBbdd) {
+            Bloquear "el script $ruta se conecta a la base de datos por su cuenta; consulta con el consulta-bbdd.ps1 del plug-in."
+        }
     }
-    if (-not $m.Success) {
-        # Entre comillas dobles, sin $ ni ` para que PowerShell no sustituya nada
-        $m = [regex]::Match($c, '^"(?<sql>[^"`$]*)"\s*\|(?<resto>.*)$', 'Singleline')
-        if ($m.Success) { $sql = $m.Groups['sql'].Value }
-    }
-    if (-not $m.Success) {
-        Bloquear 'pasa la sentencia entre comillas por la tuberia: ''SELECT ...'' | powershell -NoProfile -ExecutionPolicy Bypass -File <ruta>\consulta.ps1 [-Bd base] [-Formato texto].'
-    }
-    $resto = $m.Groups['resto'].Value.Trim()
-    $ruta = '("[^"$`]+[\\/]consulta\.ps1"|''[^''$`]+[\\/]consulta\.ps1''|[^\s"''`$;|&]+[\\/]consulta\.ps1)'
-    $forma = '^(pwsh|powershell)(\.exe)?(\s+-(NoProfile|NonInteractive|NoLogo|ExecutionPolicy\s+Bypass))*\s+-File\s+' + $ruta +
-             '(\s+-(Bd\s+[A-Za-z0-9_]+|Formato\s+(csv|texto)|TimeoutSegundos\s+\d+))*$'
-    if ($resto -notmatch "(?i)$forma" -or $resto -notmatch '(?i)-ExecutionPolicy\s+Bypass') {
-        Bloquear 'la llamada a consulta.ps1 no tiene la forma permitida.'
-    }
-    if ($resto -notmatch '(?i)[\\/]\.claude[\\/]plugins[\\/].*[\\/]scripts[\\/]consulta\.ps1') {
-        Bloquear 'solo se admite el consulta.ps1 de la skill oracle-desas.'
-    }
-    Comprobar-Select $sql
 }
 
-# Rutas de credenciales: los .env, el wallet de oracle-desas y la carpeta de BBDD del plug-in
+# Rutas de credenciales: los .env, wallets y la carpeta de BBDD del plug-in
 $credenciales = '(?i)\.env$|[\\/]ClaudeCodePlsql[\\/]bbdd([\\/]|$)|[\\/]\.secrets([\\/]|$)|wallet'
 
 try {
@@ -291,7 +261,7 @@ try {
     $ti = $entrada.tool_input
     $todo = if ($ti) { $ti | ConvertTo-Json -Depth 10 -Compress } else { '' }
 
-    # 1) Servidor MCP de SQLcl del plug-in
+    # 1) Servidor MCP de SQLcl del plug-in (RutaSqlcl)
     if ($herramienta -like 'mcp__sqlcl__*') {
         $accion = $herramienta.Substring('mcp__sqlcl__'.Length)
         switch ($accion) {
@@ -307,31 +277,23 @@ try {
 
     # 2) Cualquier otro servidor MCP que parezca de base de datos
     if ($herramienta -like 'mcp__*' -and $herramienta -match '(?i)oracle|sql|database|_db') {
-        Bloquear "solo se puede usar la base de datos con los envoltorios de consulta ($herramienta)."
+        Bloquear "solo se puede usar la base de datos con el consulta-bbdd.ps1 del plug-in ($herramienta)."
     }
 
-    # 3) Consola: consultas solo con los envoltorios; nada de clientes de Oracle, credenciales ni configuracion
+    # 3) Consola: consultas solo con el envoltorio; nada de clientes de Oracle, credenciales ni configuracion
     if ($herramienta -in 'Bash', 'PowerShell') {
         $cmd = [string]$ti.command
-        # Buscar la ruta de un envoltorio (lo que indican las skills) es de solo lectura: Get-ChildItem y poco mas
-        if ($cmd -match '(?i)(query|consulta)\.ps1' -and $cmd -notmatch '[;&>`]|\$\(' -and
-            (($cmd -replace '^\s*\(|\)(\.FullName)?\s*$', '') -split '\|' | Where-Object { $_.Trim() -notmatch '^(Get-ChildItem|Sort-Object|Select-Object|Where-Object)\b' }).Count -eq 0) {
-            exit 0
-        }
-        if ($cmd -match '(?i)query\.ps1') {
-            Comprobar-Query $cmd
-            Preguntar 'Consulta de solo lectura: revisala antes de aprobarla.'
-        }
-        if ($cmd -match '(?i)consulta\.ps1') {
-            Comprobar-Envoltorio $cmd
+        if ($cmd -match '(?i)consulta-bbdd\.ps1') {
+            Comprobar-Consulta $cmd
             Preguntar 'Consulta de solo lectura: revisala antes de aprobarla.'
         }
         $clientes = '(^|[\s;&|(''"`/\\])(sql|sqlplus|sqlcl|sqlldr|impdp|expdp|exp|imp|rman|dgmgrl|tnsping|orapki|mkstore)(\.exe|\.cmd|\.bat)?(?=$|[\s;&|)''"`])'
-        if ($cmd -match "(?i)$clientes") { Bloquear 'no se pueden lanzar clientes de Oracle desde la consola; usa el query.ps1 de la skill desa04-sqlplus.' }
+        if ($cmd -match "(?i)$clientes") { Bloquear 'no se pueden lanzar clientes de Oracle desde la consola; usa el consulta-bbdd.ps1 del plug-in.' }
         if ($cmd -match '(?i)oracledb|cx_Oracle|Oracle\.ManagedDataAccess|OracleClient|jdbc:oracle|Invoke-Sqlcmd|odbc') { Bloquear 'no se puede acceder a la base de datos desde la consola.' }
         if ($cmd -match '(?i)ClaudeCodePlsql') { Bloquear 'no se puede tocar la carpeta del plug-in desde la consola.' }
         if ($cmd -match '(?i)settings(\.local)?\.json|disableAllHooks') { Bloquear 'no se pueden tocar los ajustes de Claude Code desde la consola.' }
-        if ($cmd -match '(?i)\.env\b|\.secrets|oracle_desas|wallet|libratmp|run_sql') { Bloquear 'no se pueden leer ni tocar credenciales de BBDD desde la consola.' }
+        if ($cmd -match '(?i)\.env\b|\.secrets|wallet|libratmp|run_sql') { Bloquear 'no se pueden leer ni tocar credenciales de BBDD desde la consola.' }
+        Comprobar-Scripts $cmd
         exit 0
     }
 
@@ -345,17 +307,17 @@ try {
     }
 
     # 5) Edicion de ficheros: ni la configuracion del plug-in, ni los ajustes de Claude Code (podrian desactivar
-    #    este hook), ni envoltorios, credenciales o scripts que abran conexiones a Oracle
+    #    este hook), ni skills, plugins o credenciales, ni scripts que se conecten a Oracle
     if ($herramienta -in 'Edit', 'Write', 'MultiEdit', 'NotebookEdit') {
         $ruta = [string]$(if ($ti.file_path) { $ti.file_path } else { $ti.notebook_path })
         if ($ruta) {
             # Por nombre y no solo por ruta completa, para que no valgan rutas cortas como RUBEN~1.HER
             if ($ruta -match '(?i)[\\/]ClaudeCodePlsql([\\/]|$)') { Bloquear 'no se puede modificar la configuracion del plug-in.' }
             if ($ruta -match '(?i)[\\/]\.claude[\\/].*settings(\.local)?\.json$|[\\/]managed-settings\.json$') { Bloquear 'no se pueden modificar los ajustes de Claude Code.' }
-            if ($ruta -match '(?i)[\\/]\.claude[\\/](plugins|skills)[\\/]|(query|consulta)\.ps1$' -or $ruta -match $credenciales) {
-                Bloquear 'no se pueden modificar las skills, los envoltorios de consulta ni las credenciales.'
+            if ($ruta -match '(?i)[\\/]\.claude[\\/](plugins|skills)[\\/]|consulta-bbdd\.ps1$' -or $ruta -match $credenciales) {
+                Bloquear 'no se pueden modificar las skills, los plugins, el envoltorio de consultas ni las credenciales.'
             }
-            if ($ruta -match '(?i)\.(py|ps1|psm1|js|ts|cs|java|bat|cmd|vbs)$' -and $todo -match '(?i)oracledb|cx_Oracle|Oracle\.ManagedDataAccess|OracleClient|jdbc:oracle|sqlplus|sqlcl') {
+            if ($ruta -match '(?i)\.(py|ps1|psm1|js|ts|cs|java|bat|cmd|vbs|sh)$' -and $todo -match $accesoBbdd) {
                 Bloquear 'no se pueden crear scripts que se conecten a la base de datos.'
             }
         }
@@ -370,14 +332,14 @@ catch {
 
     /// <summary>Norma de base de datos que se añade al prompt de sistema de Claude Code en las sesiones del plug-in.</summary>
     /// <remarks>Sin comillas dobles: Windows PowerShell 5.1 las rompe al pasar el argumento a claude.exe.</remarks>
-    public static string ReglaBaseDatos(string bbdd) =>
+    public static string ReglaBaseDatos(string consulta, string bbdd) =>
         "Sesión abierta desde el plug-in de PL/SQL Developer. Contra la base de datos solo puedes consultar, y el usuario " +
-        "aprueba cada consulta: una sentencia SELECT, WITH o DESCRIBE por llamada al query.ps1 de la skill desa04-sqlplus, " +
-        "así: & '<ruta del query.ps1>' -Sql 'SELECT ...' -EnvFile '<fichero>', con el SQL entre comillas simples " +
-        "(doblando las del SQL) o con -File y un .sql. " + bbdd + " Cuando consultes una que no sea la de desarrollo, " +
-        "di de cuál sale el dato. Nada de DML, DDL, PL/SQL ni COMMIT, ni sqlplus, sql o mkstore por tu cuenta, ni leer " +
-        "los .env. Un hook del plug-in bloquea todo lo demás: si te bloquea, no busques otra vía; explica qué habría que " +
-        "ejecutar y deja que lo haga el usuario.";
+        "aprueba cada consulta: una sentencia SELECT, WITH o DESCRIBE por llamada al envoltorio del plug-in, así: " +
+        $"& '{consulta}' -Sql 'SELECT ...' [-Bd <nombre>], con el SQL entre comillas simples (doblando las del SQL) o " +
+        "con -File y un .sql; -Lista dice qué BBDD tienes. Sin -Bd consulta la de desarrollo. " + bbdd +
+        " Cuando consultes una que no sea la de desarrollo, di de cuál sale el dato. Nada de DML, DDL, PL/SQL ni COMMIT, " +
+        "ni sqlplus, sql u otros scripts que se conecten por su cuenta, ni leer credenciales. Un hook del plug-in bloquea " +
+        "todo lo demás: si te bloquea, no busques otra vía; explica qué habría que ejecutar y deja que lo haga el usuario.";
 
     /// <summary>Ajustes de Claude Code para las sesiones del plug-in (--settings): el hook de solo consultas.</summary>
     public static string SettingsJson(string hookPath)
@@ -406,9 +368,9 @@ catch {
     /// <summary>Alta de una BD para Claude (botones Conectar a BBDD y Fijar como BD de desarrollo). Se reescribe en cada uso en %APPDATA%\ClaudeCodePlsql\alta-bbdd.ps1.</summary>
     public const string AltaBbdd = """
 # Da de alta una BD para Claude (botones "Conectar a BBDD" y "Fijar como BD de desarrollo" del plug-in).
-# Lo lanza el plug-in, que le pasa por stdin un JSON con la sesion activa de PL/SQL Developer. Escribe un .env con el
-# formato del query.ps1 de la skill desa04-sqlplus (DESA04_USER, DESA04_PASSWORD, DESA04_HOST, DESA04_PORT,
-# DESA04_SERVICE) y el indice de conexiones que leen el plug-in, el hook y el mod:
+# Lo lanza el plug-in, que le pasa por stdin un JSON con la sesion activa de PL/SQL Developer. Escribe el .env que lee
+# consulta-bbdd.ps1 (BD_USUARIO, BD_CLAVE, BD_HOST, BD_PUERTO, BD_SERVICIO) y el indice de conexiones que leen el
+# plug-in, el envoltorio y el mod:
 #   modo desarrollo: %APPDATA%\ClaudeCodePlsql\bbdd\desarrollo.env y desarrollo.json (para todos los proyectos)
 #   modo proyecto:   %APPDATA%\ClaudeCodePlsql\bbdd\<proyecto>\<nombre>.env y conexiones.json (solo ese proyecto)
 # La clave llega por stdin y solo se escribe en el .env (en el perfil local, nunca en la carpeta del expediente).
@@ -440,13 +402,13 @@ function Resolver-Descriptor([string]$bd, [string]$tnsAdmin) {
     throw "No encuentro la base '$bd' en ningun tnsnames.ora ($($dirs -join '; '))."
 }
 
-# query.ps1 conecta por EZConnect: hace falta host, puerto y servicio (con SID no se puede)
+# consulta-bbdd.ps1 conecta por EZConnect: hace falta host, puerto y servicio (con SID no se puede)
 function Partes-Conexion([string]$descriptor) {
     $host_ = [regex]::Match($descriptor, '(?i)\(\s*HOST\s*=\s*([^)\s]+)\s*\)').Groups[1].Value
     $port  = [regex]::Match($descriptor, '(?i)\(\s*PORT\s*=\s*(\d+)\s*\)').Groups[1].Value
     $serv  = [regex]::Match($descriptor, '(?i)\(\s*SERVICE_NAME\s*=\s*([^)\s]+)\s*\)').Groups[1].Value
     if (-not $serv -and $descriptor -match '(?i)\(\s*SID\s*=') {
-        throw 'La base se define con SID y no con SERVICE_NAME: el query.ps1 de la skill desa04-sqlplus solo conecta por servicio.'
+        throw 'La base se define con SID y no con SERVICE_NAME: el plug-in solo conecta por servicio.'
     }
     if (-not $host_ -or -not $serv) { throw "No saco host y servicio de la definicion de la base: $descriptor" }
     if (-not $port) { $port = '1521' }
@@ -455,9 +417,9 @@ function Partes-Conexion([string]$descriptor) {
 
 function Escribir-Env([string]$ruta, [string]$usuario, [string]$clave, $partes) {
     $texto = "# Lo escribe el plug-in de PL/SQL Developer (boton Conectar a BBDD). No lo edites a mano.`r`n" +
-             "DESA04_USER=$usuario`r`nDESA04_PASSWORD=$clave`r`nDESA04_HOST=$($partes.host)`r`n" +
-             "DESA04_PORT=$($partes.port)`r`nDESA04_SERVICE=$($partes.servicio)`r`n"
-    # En ANSI, como lo lee query.ps1 (Get-Content -Encoding Default)
+             "BD_USUARIO=$usuario`r`nBD_CLAVE=$clave`r`nBD_HOST=$($partes.host)`r`n" +
+             "BD_PUERTO=$($partes.port)`r`nBD_SERVICIO=$($partes.servicio)`r`n"
+    # En ANSI, como lo lee consulta-bbdd.ps1 (Get-Content -Encoding Default)
     [System.IO.File]::WriteAllText($ruta, $texto, [System.Text.Encoding]::Default)
 }
 
@@ -469,7 +431,7 @@ try {
     [Console]::InputEncoding = [System.Text.Encoding]::UTF8
     $e = [Console]::In.ReadToEnd() | ConvertFrom-Json
     if (-not $e.usuario -or -not $e.clave -or -not $e.bd) { throw 'Faltan datos de la conexion (usuario, clave o base de datos).' }
-    if ([string]$e.clave -match '"') { throw 'La contrasena tiene una comilla doble y el query.ps1 de la skill no la admite.' }
+    if ([string]$e.clave -match '"') { throw 'La contrasena tiene una comilla doble y no se puede usar en el CONNECT de sqlplus.' }
     $partes = Partes-Conexion (Resolver-Descriptor ([string]$e.bd) ([string]$e.tnsAdmin))
     $fecha = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     New-Item -ItemType Directory -Force -Path $dirBbdd | Out-Null
@@ -509,6 +471,197 @@ catch {
 }
 """;
 
+    /// <summary>
+    /// Envoltorio de consultas de solo lectura contra las BBDD dadas de alta con los botones del plug-in. Se reescribe
+    /// en cada arranque en %APPDATA%\ClaudeCodePlsql\consulta-bbdd.ps1.
+    /// </summary>
+    public const string ConsultaBbdd = """
+# Consulta de solo lectura contra una BD dada de alta con los botones del plug-in "Claude Code para PL/SQL Developer"
+# (lo escribe el plug-in en cada arranque; no es para editarlo a mano).
+#
+# Uso:
+#   & '<ruta>\consulta-bbdd.ps1' -Sql 'SELECT ...' [-Bd <nombre>] [-MaxLines n]
+#   & '<ruta>\consulta-bbdd.ps1' -File <consulta.sql> [-Bd <nombre>]
+#   & '<ruta>\consulta-bbdd.ps1' -Lista
+#
+# Sin -Bd consulta la BD de desarrollo (boton "Fijar como BD de desarrollo"). Con -Bd, una de las conectadas en el
+# proyecto de esta sesion de Claude (boton "Conectar a BBDD"; el proyecto lo pone el plug-in en CLAUDE_PLSQL_PROYECTO).
+#
+# Solo lectura, en tres capas: el filtro de este script (y antes el hook del plug-in), sqlplus en modo restringido
+# -R 3 (sin HOST, @, SPOOL ni nada que toque el disco) y SET TRANSACTION READ ONLY. Ninguna frena una funcion con
+# PRAGMA AUTONOMOUS_TRANSACTION llamada desde un SELECT.
+#
+# La clave sale del .env y va en el CONNECT del guion que recibe sqlplus por stdin, en un temporal que se borra
+# siempre; nunca en la linea de comandos.
+param(
+    [string]$Sql,
+    [string]$File,
+    [string]$Bd = 'desarrollo',
+    [int]$MaxLines = 200,
+    [switch]$Lista
+)
+
+$ErrorActionPreference = 'Stop'
+$dirBbdd = Join-Path $env:APPDATA 'ClaudeCodePlsql\bbdd'
+
+function Rechazo([string]$mensaje, [int]$codigo) {
+    [Console]::Error.WriteLine($mensaje)
+    exit $codigo
+}
+
+function Leer-Json([string]$ruta) {
+    if (-not (Test-Path -LiteralPath $ruta)) { return $null }
+    try { return Get-Content -LiteralPath $ruta -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
+}
+
+# BBDD que puede consultar esta sesion: nombre (para -Bd), usuario@alias y tipo
+function Disponibles {
+    $lista = @()
+    $d = Leer-Json (Join-Path $dirBbdd 'desarrollo.json')
+    if ($d -and (Test-Path -LiteralPath (Join-Path $dirBbdd 'desarrollo.env'))) {
+        $lista += [pscustomobject]@{ nombre = 'desarrollo'; origen = [string]$d.origen; tipo = 'desarrollo' }
+    }
+    $proyecto = $env:CLAUDE_PLSQL_PROYECTO
+    if ($proyecto -match '^[0-9a-f]{12}$') {
+        $i = Leer-Json (Join-Path $dirBbdd "$proyecto\conexiones.json")
+        foreach ($c in @($i.conexiones)) {
+            if ($c -and (Test-Path -LiteralPath (Join-Path $dirBbdd "$proyecto\$($c.nombre).env"))) {
+                $lista += [pscustomobject]@{ nombre = [string]$c.nombre; origen = [string]$c.origen; tipo = [string]$c.tipo }
+            }
+        }
+    }
+    return $lista
+}
+
+if ($Lista) {
+    $d = @(Disponibles)
+    if ($d.Count -eq 0) { 'Ninguna BD conectada: se conectan con los botones de PL/SQL Developer.' }
+    else { $d | ForEach-Object { "$($_.nombre)|$($_.origen)|$($_.tipo)" } }
+    exit 0
+}
+
+# ---------------------------------------------------------------------------- la BD
+if ($Bd -notmatch '^[A-Za-z0-9_]+$') { Rechazo "Nombre de BD no valido: '$Bd'." 2 }
+$Bd = $Bd.ToLowerInvariant()
+if ($Bd -eq 'desarrollo') {
+    $envFile = Join-Path $dirBbdd 'desarrollo.env'
+} else {
+    $proyecto = $env:CLAUDE_PLSQL_PROYECTO
+    if ($proyecto -notmatch '^[0-9a-f]{12}$') { Rechazo 'Esta sesion no es de un proyecto del plug-in: solo se puede consultar la BD de desarrollo.' 3 }
+    $envFile = Join-Path $dirBbdd "$proyecto\$Bd.env"
+}
+if (-not (Test-Path -LiteralPath $envFile)) {
+    $hay = (@(Disponibles) | ForEach-Object { $_.nombre }) -join ', '
+    if (-not $hay) { $hay = 'ninguna' }
+    Rechazo "La BD '$Bd' no esta conectada en esta sesion (disponibles: $hay). Se conectan con los botones de PL/SQL Developer." 3
+}
+
+# ---------------------------------------------------------------------------- la sentencia
+if ($File) {
+    if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { Rechazo "No existe el fichero: $File" 2 }
+    $texto = Get-Content -LiteralPath $File -Raw -Encoding Default
+} elseif ($Sql) {
+    $texto = $Sql
+} else {
+    Rechazo "Indica la consulta con -Sql 'SELECT ...' o con -File <fichero.sql>." 2
+}
+$texto = "$texto".Trim()
+if (-not $texto) { Rechazo 'La consulta esta vacia.' 2 }
+
+# Filtro de solo lectura: quita comentarios y literales para que no den falsos positivos ni oculten nada
+$limpio = [regex]::Replace($texto, '/\*.*?\*/', ' ', 'Singleline')
+$limpio = [regex]::Replace($limpio, '--[^\r\n]*', ' ')
+if ($limpio -match "(?i)\b[nq]?q'") { Rechazo "BLOQUEADO: los literales q'...' no se admiten." 2 }
+$limpio = [regex]::Replace($limpio, "'(?:[^']|'')*'", ' LITERAL ')
+$limpio = [regex]::Replace($limpio, '"[^"]*"', 'X').Trim()
+$limpio = [regex]::Replace($limpio, '[\s;/]+$', '')
+if ($limpio -match "['""]") { Rechazo 'BLOQUEADO: comillas sin cerrar.' 2 }
+if ($limpio.Contains(';')) { Rechazo 'BLOQUEADO: una sola sentencia por llamada.' 2 }
+if ($limpio -notmatch '(?i)^DESC(RIBE)?\s+[\w$#.]+$') {
+    if ($limpio -notmatch '(?i)^\(*\s*(SELECT|WITH)\b') { Rechazo 'BLOQUEADO: solo SELECT, WITH o DESCRIBE.' 2 }
+    $m = [regex]::Match($limpio, '(?i)\b(INSERT|UPDATE|DELETE|MERGE|UPSERT|CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE|COMMENT|AUDIT|NOAUDIT|PURGE|FLASHBACK|ANALYZE|LOCK|COMMIT|ROLLBACK|SAVEPOINT|BEGIN|DECLARE|EXEC|EXECUTE|CALL|FUNCTION|PROCEDURE|HOST|SPOOL|DISCONNECT|PASSWORD|SHUTDOWN|STARTUP)\b')
+    if ($m.Success) { Rechazo "BLOQUEADO: la sentencia contiene '$($m.Value.ToUpper())'." 2 }
+}
+
+# ---------------------------------------------------------------------------- credenciales y sqlplus
+$cfg = @{}
+foreach ($linea in (Get-Content -LiteralPath $envFile -Encoding Default)) {
+    $l = $linea.Trim()
+    if (-not $l -or $l.StartsWith('#')) { continue }
+    $i = $l.IndexOf('=')
+    if ($i -lt 1) { continue }
+    # Solo por el primer '=': la clave puede llevar '='
+    $cfg[$l.Substring(0, $i).Trim()] = $l.Substring($i + 1).Trim()
+}
+foreach ($k in 'BD_USUARIO', 'BD_CLAVE', 'BD_HOST', 'BD_PUERTO', 'BD_SERVICIO') {
+    if (-not $cfg[$k]) { Rechazo "Falta $k en la conexion '$Bd': vuelve a conectarla con el boton de PL/SQL Developer." 3 }
+}
+if ($cfg['BD_CLAVE'].Contains('"')) { Rechazo 'La clave tiene una comilla doble y no se puede entrecomillar en el CONNECT.' 3 }
+
+$sqlplus = (Get-Command 'sqlplus' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+if (-not $sqlplus -and $env:ORACLE_HOME) { $sqlplus = Join-Path $env:ORACLE_HOME 'bin\sqlplus.exe' }
+if (-not $sqlplus -or -not (Test-Path -LiteralPath $sqlplus)) {
+    $sqlplus = Get-ChildItem 'C:\Oracle\*\bin\sqlplus.exe', 'C:\app\*\product\*\*\bin\sqlplus.exe' -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $sqlplus) { Rechazo 'No se encuentra sqlplus.exe: hace falta el cliente de Oracle (en el PATH o en ORACLE_HOME).' 4 }
+
+$cuerpo = $texto.TrimEnd()
+if (-not $cuerpo.EndsWith(';') -and -not $cuerpo.EndsWith('/')) { $cuerpo += ';' }
+$guion = @(
+    'WHENEVER SQLERROR EXIT FAILURE',
+    'WHENEVER OSERROR EXIT FAILURE',
+    "CONNECT $($cfg['BD_USUARIO'])/`"$($cfg['BD_CLAVE'])`"@//$($cfg['BD_HOST']):$($cfg['BD_PUERTO'])/$($cfg['BD_SERVICIO'])",
+    'SET DEFINE OFF', 'SET ECHO OFF', 'SET VERIFY OFF', 'SET HEADING ON', 'SET SQLBLANKLINES ON', 'SET SERVEROUTPUT OFF',
+    'SET LONG 200000', 'SET LONGCHUNKSIZE 200000', 'SET NULL [NULL]', "SET MARKUP CSV ON DELIMITER '|' QUOTE OFF",
+    'SET PAGESIZE 50000', 'SET FEEDBACK OFF',
+    'SET TRANSACTION READ ONLY;',
+    'SET FEEDBACK ON',
+    $cuerpo,
+    'EXIT SUCCESS'
+) -join "`r`n"
+
+# ---------------------------------------------------------------------------- ejecucion
+$w1252 = [System.Text.Encoding]::GetEncoding(1252)
+$fEntrada = [System.IO.Path]::GetTempFileName()
+$fSalida = [System.IO.Path]::GetTempFileName()
+$nlsPrevio = $env:NLS_LANG
+$cron = [System.Diagnostics.Stopwatch]::StartNew()
+$cortada = $false
+try {
+    # Windows-1252 y CRLF, como los .sql de LIBRA
+    [System.IO.File]::WriteAllText($fEntrada, $guion + "`r`n", $w1252)
+    $env:NLS_LANG = 'SPANISH_SPAIN.WE8MSWIN1252'
+    $p = Start-Process -FilePath $sqlplus -ArgumentList @('-S', '-L', '-R', '3', '/nolog') -RedirectStandardInput $fEntrada `
+                       -RedirectStandardOutput $fSalida -NoNewWindow -PassThru
+    $null = $p.Handle  # sin esto, Start-Process deja ExitCode vacio al terminar
+    if (-not $p.WaitForExit(120000)) {
+        try { $p.Kill() } catch { }
+        $cortada = $true
+    } else {
+        $codigo = $p.ExitCode
+        $lineas = @([System.IO.File]::ReadAllLines($fSalida, $w1252))
+    }
+}
+finally {
+    $env:NLS_LANG = $nlsPrevio
+    # El de entrada lleva la clave: se borra siempre (con .NET, que no se lia con rutas 8.3 como RUBEN~1)
+    foreach ($f in $fEntrada, $fSalida) { try { [System.IO.File]::Delete($f) } catch { } }
+}
+$cron.Stop()
+if ($cortada) { Rechazo "La consulta contra '$Bd' ha pasado de 120 s y se ha cortado: acotala (ROWNUM) o partela." 124 }
+# Un CONNECT fallido no es SQLERROR: sqlplus sigue y acaba en EXIT SUCCESS aunque no haya hecho nada
+if ($null -eq $codigo -or ($codigo -eq 0 -and @($lineas -match '^\s*(ERROR:|ORA-\d|SP2-\d)').Count -gt 0)) { $codigo = 1 }
+
+$truncada = $MaxLines -gt 0 -and $lineas.Count -gt $MaxLines
+if ($truncada) { $lineas[0..($MaxLines - 1)] } else { $lineas }
+$meta = "-- $Bd | $([math]::Round($cron.Elapsed.TotalSeconds, 2)) s"
+if ($truncada) { $meta += " | SALIDA TRUNCADA: $($lineas.Count) lineas, mostradas $MaxLines (acota con ROWNUM o sube -MaxLines)" }
+''
+$meta
+exit $codigo
+""";
+
     // Mod de Claude Code con la franja de BBDD conectadas (%APPDATA%\ClaudeCodePlsql\mod-bbdd, cargado con --plugin-dir)
 
     /// <summary>plugin.json del mod de la franja de BBDD.</summary>
@@ -528,7 +681,7 @@ catch {
 
     /// <summary>Contrato de tipos del mod de la franja de BBDD.</summary>
     public const string ModTypes = """
-export type Conexion = { nombre: string; origen: string; tipo: 'desarrollo' | 'pruebas' | 'produccion'; env: string }
+export type Conexion = { nombre: string; origen: string; tipo: 'desarrollo' | 'pruebas' | 'produccion' }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -566,10 +719,7 @@ async function leer($: EngineInterface): Promise<Conexion[]> {
 
   const desarrollo = await leerJson($, `${dir}\\desarrollo.json`)
   if (desarrollo?.origen) {
-    lista.push({
-      nombre: String(desarrollo.nombre ?? desarrollo.origen), origen: String(desarrollo.origen), tipo: 'desarrollo',
-      env: String(desarrollo.env ?? ''),
-    })
+    lista.push({ nombre: 'desarrollo', origen: String(desarrollo.origen), tipo: 'desarrollo' })
   }
 
   // El proyecto de esta sesión lo pone el plug-in al abrir Claude
@@ -578,28 +728,24 @@ async function leer($: EngineInterface): Promise<Conexion[]> {
     const indice = await leerJson($, `${dir}\\${proyecto}\\conexiones.json`)
     for (const c of indice?.conexiones ?? []) {
       if (c?.origen) {
-        lista.push({
-          nombre: String(c.nombre), origen: String(c.origen), tipo: c.tipo === 'produccion' ? 'produccion' : 'pruebas',
-          env: String(c.env ?? ''),
-        })
+        lista.push({ nombre: String(c.nombre), origen: String(c.origen), tipo: c.tipo === 'produccion' ? 'produccion' : 'pruebas' })
       }
     }
   }
   return lista
 }
 
-// Lo que se le dice a Claude de las BBDD (las rutas de los .env no son secretas; su contenido sí y no se lee)
-function describir(lista: Conexion[]): string {
+// Lo que se le dice a Claude de las BBDD: el nombre para -Bd, nunca dónde están las credenciales
+function describir(lista: Conexion[], appdata: string): string {
   const desarrollo = lista.find(c => c.tipo === 'desarrollo')
   const otras = lista.filter(c => c.tipo !== 'desarrollo')
-  const linea = (c: Conexion) =>
-    `${c.origen} (${c.tipo === 'produccion' ? 'producción' : c.tipo}) con -EnvFile '${c.env}'`
+  const linea = (c: Conexion) => `${c.origen} (${c.tipo === 'produccion' ? 'producción' : c.tipo}), -Bd ${c.nombre}`
   return [
     'BBDD que puedes consultar ahora mismo desde esta sesión (las conecta el usuario con los botones de PL/SQL ' +
       'Developer; esta lista sustituye a cualquier otra que se te diera antes):',
-    `- Desarrollo, la de por defecto: ${desarrollo ? linea(desarrollo) : 'sin fijar; usa la de la skill (DESA04, sin -EnvFile)'}.`,
+    `- Desarrollo, la de por defecto: ${desarrollo ? `${desarrollo.origen} (sin -Bd)` : 'sin fijar; pide al usuario que pulse Fijar como BD de desarrollo'}.`,
     otras.length > 0 ? `- Del proyecto: ${otras.map(linea).join('; ')}.` : '- Del proyecto: ninguna.',
-    "Consulta con el query.ps1 de la skill desa04-sqlplus: & '<ruta del query.ps1>' -Sql 'SELECT ...' -EnvFile '<fichero>'.",
+    `Consulta con & '${appdata}\\ClaudeCodePlsql\\consulta-bbdd.ps1' -Sql 'SELECT ...' [-Bd <nombre>].`,
   ].join('\n')
 }
 
@@ -624,7 +770,7 @@ export const register: Register = on => {
   let ultima = ''
   on('prompt.submit', async ($, e, next) => {
     if (e.command) return next(e)
-    const texto = describir(await leer($))
+    const texto = describir(await leer($), (await $.env.get('APPDATA')) ?? '%APPDATA%')
     if (texto === ultima) return next(e)
     ultima = texto
     return next({ ...e, context: [...(e.context ?? []), texto] })
@@ -640,7 +786,7 @@ export const register: Register = on => {
     return (
       <Box>
         <Text dimColor>BBDD · desarrollo: </Text>
-        <Text color="success">{desarrollo ? desarrollo.origen : 'sin fijar (DESA04 de la skill)'}</Text>
+        <Text color="success">{desarrollo ? desarrollo.origen : 'sin fijar'}</Text>
         {otras.length > 0 ? <Text dimColor> · proyecto: </Text> : null}
         {otras.map((c, i) => (
           <Text key={c.nombre} color={c.tipo === 'produccion' ? 'error' : 'warning'}>

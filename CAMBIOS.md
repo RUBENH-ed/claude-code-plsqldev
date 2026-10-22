@@ -1,5 +1,16 @@
 # Cambios
 
+## 1.5 (EDISA)
+
+- **Sin depender de ninguna skill.** El plug-in trae su propio envoltorio de consultas,
+  `%APPDATA%\ClaudeCodePlsql\consulta-bbdd.ps1`, que se escribe en cada arranque: Claude elige la base por su nombre
+  (`-Bd`; sin él, la de desarrollo) y el propio envoltorio solo admite las del proyecto de la sesión. `-Lista` dice
+  cuáles hay. Los `.env` pasan a tener claves propias (`BD_USUARIO`, `BD_CLAVE`, `BD_HOST`, `BD_PUERTO`,
+  `BD_SERVICIO`): **hay que volver a pulsar Fijar como BD de desarrollo y Conectar a BBDD** después de actualizar.
+- **El hook bloquea cualquier script que se conecte a Oracle por su cuenta** (mira dentro: `sqlplus`, `sql`, librerías
+  de conexión), venga de una skill o de donde sea; solo vale el envoltorio del plug-in.
+- Sin BD de desarrollo fijada, Claude pide que la fijes en lugar de usar ninguna por su cuenta.
+
 ## 1.4.1 (EDISA)
 
 - **Claude se entera de las BBDD que conectas con su sesión ya abierta.** El mod añade a cada mensaje la lista de

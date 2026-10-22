@@ -216,7 +216,7 @@ internal static unsafe class Plugin
 
     /// <summary>
     /// Botones "Conectar a BBDD" (la sesión activa, solo para el proyecto de la ventana) y "Fijar como BD de
-    /// desarrollo" (la de todos los proyectos). Escriben el .env que usa el query.ps1 de la skill desa04-sqlplus en
+    /// desarrollo" (la de todos los proyectos). Escriben el .env que lee el envoltorio consulta-bbdd.ps1 en
     /// %APPDATA%\ClaudeCodePlsql\bbdd, nunca en la carpeta del expediente. Claude no ve la contraseña.
     /// </summary>
     private static void ConnectDatabase(bool development)
@@ -266,7 +266,6 @@ internal static unsafe class Plugin
             Win32.Message($"No he podido dar de alta la BD {origin} para Claude:\n\n{error}", Win32.MB_ICONWARNING);
             return;
         }
-        string envFile = output.StartsWith("OK ") ? output[3..].Trim() : "";
         Log.Info($"BD {origin} dada de alta para Claude ({kind}).");
 
         if (development)
@@ -277,10 +276,12 @@ internal static unsafe class Plugin
             return;
         }
 
-        // Sin comillas dobles: Windows PowerShell 5.1 las rompe al pasar el mensaje a claude.exe
+        // Sin comillas dobles: Windows PowerShell 5.1 las rompe al pasar el mensaje a claude.exe. El nombre para -Bd es
+        // el que deja alta-bbdd.ps1: el alias en minúsculas, con _ en lo que no sea letra, número o _
+        string name = System.Text.RegularExpressions.Regex.Replace(dbName, "[^A-Za-z0-9_]", "_").ToLowerInvariant();
         string prompt =
-            $"He conectado en este proyecto la BD {origin} ({kind}). Consúltala con el query.ps1 de la skill " +
-            $"desa04-sqlplus y -EnvFile '{envFile}'; la de desarrollo sigue siendo la de por defecto. " +
+            $"He conectado en este proyecto la BD {origin} ({kind}). Consúltala con & '{WriteQueryScript()}' " +
+            $"-Sql 'SELECT ...' -Bd {name}; la de desarrollo sigue siendo la de por defecto. " +
             "Compruébalo con SELECT USER FROM dual.";
         Launch(ws, prompt, prompt, $"BD {origin} disponible para Claude en este proyecto");
     }
@@ -313,15 +314,15 @@ internal static unsafe class Plugin
     /// <summary>Texto para Claude con las BBDD que puede consultar desde esta carpeta (sin comillas dobles).</summary>
     private static string DatabaseSummary(Workspace ws)
     {
-        (string Origin, string Env)? dev = null;
-        var project = new List<(string Origin, string Env, string Kind)>();
+        string? dev = null;
+        var project = new List<(string Origin, string Name, string Kind)>();
         try
         {
             string devFile = System.IO.Path.Combine(BbddDir, "desarrollo.json");
             if (File.Exists(devFile))
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(devFile));
-                dev = (Prop(doc.RootElement, "origen"), Prop(doc.RootElement, "env"));
+                dev = Prop(doc.RootElement, "origen");
             }
             string index = System.IO.Path.Combine(BbddDir, ProjectId(ws), "conexiones.json");
             if (File.Exists(index))
@@ -331,7 +332,7 @@ internal static unsafe class Plugin
                     doc.RootElement.TryGetProperty("conexiones", out var list) && list.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
                     foreach (var c in list.EnumerateArray())
-                        project.Add((Prop(c, "origen"), Prop(c, "env"), Prop(c, "tipo")));
+                        project.Add((Prop(c, "origen"), Prop(c, "nombre"), Prop(c, "tipo")));
                 }
             }
         }
@@ -341,10 +342,9 @@ internal static unsafe class Plugin
         }
 
         var sb = new StringBuilder();
-        sb.Append(dev is { } d
-            ? $"BD de desarrollo, la de por defecto: {d.Origin}, con -EnvFile '{d.Env}'. "
-            : "Todavía no hay BD de desarrollo fijada: usa la de la skill (DESA04, sin -EnvFile) y avisa al usuario de que " +
-              "la fije con el botón Fijar como BD de desarrollo. ");
+        sb.Append(!string.IsNullOrEmpty(dev)
+            ? $"BD de desarrollo, la de por defecto (sin -Bd): {dev}. "
+            : "Todavía no hay BD de desarrollo fijada: pide al usuario que la fije con el botón Fijar como BD de desarrollo. ");
         if (project.Count == 0)
         {
             sb.Append("En este proyecto no hay más BBDD conectadas.");
@@ -352,7 +352,7 @@ internal static unsafe class Plugin
         else
         {
             sb.Append("BBDD conectadas en este proyecto: ");
-            sb.Append(string.Join("; ", project.Select(c => $"{c.Origin} ({c.Kind}) con -EnvFile '{c.Env}'")));
+            sb.Append(string.Join("; ", project.Select(c => $"{c.Origin} ({c.Kind}), -Bd {c.Name}")));
             sb.Append('.');
         }
         return sb.ToString().Replace("\"", "'");
@@ -360,6 +360,15 @@ internal static unsafe class Plugin
 
     private static string Prop(System.Text.Json.JsonElement e, string name) =>
         e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(name, out var v) ? v.ToString() : "";
+
+    /// <summary>Escribe (si ha cambiado) el envoltorio de consultas y devuelve su ruta.</summary>
+    private static string WriteQueryScript()
+    {
+        Directory.CreateDirectory(Config.Dir);
+        string file = System.IO.Path.Combine(Config.Dir, "consulta-bbdd.ps1");
+        WriteIfChanged(file, Templates.ConsultaBbdd, new UTF8Encoding(true)); // con BOM para Windows PowerShell 5.1
+        return file;
+    }
 
     /// <summary>Escribe (si ha cambiado) el mod de la franja de BBDD y devuelve su carpeta, para --plugin-dir.</summary>
     private static string WriteMod()
@@ -746,7 +755,7 @@ internal static unsafe class Plugin
         options.Add("--settings");
         options.Add(PsQuote(settingsFile));
         options.Add("--append-system-prompt");
-        options.Add(PsQuote(Templates.ReglaBaseDatos(DatabaseSummary(ws))));
+        options.Add(PsQuote(Templates.ReglaBaseDatos(WriteQueryScript(), DatabaseSummary(ws))));
         options.Add("--plugin-dir");
         options.Add(PsQuote(WriteMod()));
 

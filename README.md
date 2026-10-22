@@ -128,25 +128,36 @@ que se lo pidas, pero eso no es una barrera de seguridad.
 
 ## Consultas de Claude a la base de datos
 
-Claude consulta con el `query.ps1` de la skill `desa04-sqlplus`, cada base con su `.env`
-(`-EnvFile`). Los `.env` los escribe el plug-in en `%APPDATA%\ClaudeCodePlsql\bbdd`, en tu perfil local y nunca en
+El plug-in lleva todo lo necesario, sin depender de ninguna skill: Claude consulta con su envoltorio,
+`%APPDATA%\ClaudeCodePlsql\consulta-bbdd.ps1`, eligiendo la base por su nombre:
+
+```powershell
+& "$env:APPDATA\ClaudeCodePlsql\consulta-bbdd.ps1" -Sql 'SELECT ...'            # la de desarrollo
+& "$env:APPDATA\ClaudeCodePlsql\consulta-bbdd.ps1" -Sql 'SELECT ...' -Bd <nombre>
+& "$env:APPDATA\ClaudeCodePlsql\consulta-bbdd.ps1" -Lista                       # las que tiene esta sesión
+```
+
+Las credenciales las guardan los botones en `.env` de `%APPDATA%\ClaudeCodePlsql\bbdd`, en tu perfil local y nunca en
 la carpeta del expediente.
 
 - **Desarrollo, siempre conectada.** **Fijar como BD de desarrollo** guarda la sesión activa (por ejemplo LATEST 19C)
-  como la base que Claude usa por defecto en todos los proyectos. Mientras no la fijes, usa la de la skill (DESA04).
+  como la base que Claude usa por defecto en todos los proyectos.
 - **Otras, solo en su proyecto.** **Conectar a BBDD** añade la sesión activa al proyecto de esa ventana (pruebas o
   producción, para comparar datos o versiones), junto a las que ya tuviera; si el alias no parece de pruebas o
   desarrollo, pide confirmación. Cada sesión de Claude que abre el plug-in sabe de qué proyecto es
-  (`CLAUDE_PLSQL_PROYECTO`) y el hook no le deja usar las BBDD de otro. **Desconectar BBDD** las quita.
-- **Solo consultas.** El hook `solo-consultas.ps1` solo deja pasar un `SELECT`, `WITH` o `DESCRIBE` por llamada, te
-  pide aprobación en cada una e impide que Claude lea los `.env`. No es una garantía total: una función con
-  `PRAGMA AUTONOMOUS_TRANSACTION` escribe aunque se llame desde un `SELECT`, y eso el filtro no lo ve.
+  (`CLAUDE_PLSQL_PROYECTO`) y el envoltorio no le deja usar las BBDD de otro. **Desconectar BBDD** las quita.
+- **Solo consultas.** El envoltorio y el hook `solo-consultas.ps1` solo dejan pasar un `SELECT`, `WITH` o `DESCRIBE`
+  por llamada; el hook te pide aprobación en cada una, impide que Claude lea las credenciales y bloquea cualquier otro
+  script que se conecte a Oracle por su cuenta (el de una skill, por ejemplo). Después, `sqlplus -R 3` y
+  `SET TRANSACTION READ ONLY`. No es una garantía total: una función con `PRAGMA AUTONOMOUS_TRANSACTION` escribe
+  aunque se llame desde un `SELECT`, y eso el filtro no lo ve.
 - **A qué BBDD está conectado.** Un mod de Claude Code (`%APPDATA%\ClaudeCodePlsql\mod-bbdd`, cargado con
-  `--plugin-dir`) pinta encima del cuadro de escritura la de desarrollo y las del proyecto, en rojo las de producción.
-- **Las contraseñas van en texto plano** en los `.env`, como los de la skill. Las sesiones de Claude que no abre el
-  plug-in no tienen el hook, así que ahí nada impide leerlos.
-- **Requisitos.** La skill `desa04-sqlplus` y el cliente de Oracle con `sqlplus`. La base tiene que definirse con
-  servicio (`SERVICE_NAME`): el `query.ps1` conecta por EZConnect.
+  `--plugin-dir`) pinta encima del cuadro de escritura la de desarrollo y las del proyecto, en rojo las de producción,
+  y le pasa a Claude la lista con cada mensaje en cuanto cambia.
+- **Las contraseñas van en texto plano** en los `.env` de tu perfil. Las sesiones de Claude que no abre el plug-in no
+  tienen el hook, así que ahí nada impide leerlos.
+- **Requisitos.** El cliente de Oracle con `sqlplus` (en el `PATH`, en `ORACLE_HOME` o en `C:\Oracle\...\bin`). La base
+  tiene que definirse con servicio (`SERVICE_NAME`): el envoltorio conecta por EZConnect.
 
 ## Si algo no funciona
 
