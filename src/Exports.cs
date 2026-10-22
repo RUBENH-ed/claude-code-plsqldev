@@ -111,6 +111,9 @@ public static unsafe class Exports
                     Plugin.MenuCopyRef => m + "&Copiar referencia para Claude",
                     Plugin.MenuFolder => m + "Abrir carpeta de &trabajo",
                     Plugin.MenuConfig => m + "Con&figurar...",
+                    Plugin.MenuConnect => m + "Conectar a &BBDD",
+                    Plugin.MenuDisconnect => m + "&Desconectar BBDD",
+                    Plugin.MenuSetDev => m + "Fijar como BD de d&esarrollo",
                     _ => "",
                 });
             }
@@ -126,6 +129,10 @@ public static unsafe class Exports
                 7 => "GROUP=Ajustes",
                 Plugin.MenuFolder => "ITEM=Abrir carpeta de trabajo",
                 Plugin.MenuConfig => "ITEM=Configurar",
+                10 => "GROUP=Base de datos",
+                Plugin.MenuConnect => "ITEM=Conectar a BBDD",
+                Plugin.MenuDisconnect => "ITEM=Desconectar BBDD",
+                Plugin.MenuSetDev => "ITEM=Fijar como BD de desarrollo",
                 _ => "",
             });
         }
