@@ -1,5 +1,16 @@
 # Cambios
 
+## 1.7 (EDISA)
+
+- **Claude abre cosas en PL/SQL Developer** con `plsql.ps1`: un fichero (`-Abrir`), un fichero nuevo que crea en
+  Windows-1252, con CRLF y sin BOM y sin pisar nunca uno existente (`-Nuevo ... -Desde ...`), o una ventana SQL, Test,
+  de Programa o de Comandos con un texto (`-Ventana`). Con `-Bd`, la ventana queda conectada a esa BD. Si PL/SQL
+  Developer está cerrado, lo arranca conectado. Nunca ejecuta nada: el plug-in atiende la petición y lee él mismo la
+  contraseña del `.env`.
+- **Las BBDD conectadas son del cliente, no del expediente**: valen para todos sus desarrollos e incidencias. El
+  cliente sale de la carpeta que contiene el expediente (saltando las de estado como `01.PENDIENTE INSTALAR REAL`) o
+  de `CarpetaClientes` en el `.ini`. Las conectadas con la 1.6 hay que volver a conectarlas una vez.
+
 ## 1.6 (EDISA)
 
 - **Grupo Herramientas en la cinta**: *Comparar con otra BD*, *Revisar normas*, *Explicar error* (con el error

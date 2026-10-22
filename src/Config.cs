@@ -23,6 +23,7 @@ internal static class Config
     public static string Sync = "preguntar";       // preguntar | automatico | no
     public static string MenuStyle = "auto";       // auto | cinta | clasico
     public static string SqlclPath = "";
+    public static string ClientsRoot = "";          // CarpetaClientes: carpeta con una subcarpeta por cliente (opcional)
     public static bool ProjectMode = true;         // ModoExpedientes: abrir Claude en la carpeta del expediente
     public static bool OnlyCp1252 = true;          // SoloWindows1252: no cargar texto que no quepa en Windows-1252
     public static bool ContinueConversation = true; // RetomarConversacion: abrir Claude con --continue
@@ -62,6 +63,7 @@ internal static class Config
                     case "sincronizar": Sync = Choice(value, "preguntar", "preguntar", "automatico", "no"); break;
                     case "estilomenu": MenuStyle = Choice(value, "auto", "auto", "cinta", "clasico"); break;
                     case "rutasqlcl": SqlclPath = value.Trim('"'); break;
+                    case "carpetaclientes": ClientsRoot = value.Trim('"').TrimEnd('\\', '/'); break;
                     case "modoexpedientes": ProjectMode = YesNo(value, true); break;
                     case "solowindows1252": OnlyCp1252 = YesNo(value, true); break;
                     case "retomarconversacion": ContinueConversation = YesNo(value, true); break;

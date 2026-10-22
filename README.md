@@ -191,10 +191,16 @@ la carpeta del expediente.
 
 - **Desarrollo, siempre conectada.** **Fijar como BD de desarrollo** guarda la sesión activa (por ejemplo LATEST 19C)
   como la base que Claude usa por defecto en todos los proyectos.
-- **Otras, solo en su proyecto.** **Conectar a BBDD** añade la sesión activa al proyecto de esa ventana (pruebas o
-  producción, para comparar datos o versiones), junto a las que ya tuviera; si el alias no parece de pruebas o
-  desarrollo, pide confirmación. Cada sesión de Claude que abre el plug-in sabe de qué proyecto es
-  (`CLAUDE_PLSQL_PROYECTO`) y el envoltorio no le deja usar las BBDD de otro. **Desconectar BBDD** las quita.
+- **Otras, por cliente.** **Conectar a BBDD** añade la sesión activa a las BBDD del cliente del expediente de esa
+  ventana (pruebas o producción, para comparar datos o versiones), junto a las que ya tuviera, y valen para todos sus
+  desarrollos e incidencias; si el alias no parece de pruebas o desarrollo, pide confirmación. El cliente sale de la
+  carpeta que contiene el expediente, saltando las de estado como `01.PENDIENTE INSTALAR REAL` (o de
+  `CarpetaClientes`); fuera de un expediente, las BBDD son de esa carpeta de trabajo. Cada sesión de Claude que abre
+  el plug-in sabe de qué cliente es (`CLAUDE_PLSQL_PROYECTO`) y el envoltorio no le deja usar las BBDD de otro.
+  **Desconectar BBDD** las quita.
+- **Abrir en PL/SQL Developer desde Claude.** Con `plsql.ps1` Claude abre un fichero, crea uno nuevo (en
+  Windows-1252, con CRLF, sin BOM y sin pisar nada) o abre una ventana con un texto, conectada a una de esas BBDD con
+  `-Bd`. Si PL/SQL Developer está cerrado, lo arranca conectado. Nunca ejecuta nada.
 - **Solo consultas.** El envoltorio y el hook `solo-consultas.ps1` solo dejan pasar un `SELECT`, `WITH` o `DESCRIBE`
   por llamada; el hook te pide aprobación en cada una, impide que Claude lea las credenciales y bloquea cualquier otro
   script que se conecte a Oracle por su cuenta (el de una skill, por ejemplo). Después, `sqlplus -R 3` y

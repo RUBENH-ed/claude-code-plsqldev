@@ -56,10 +56,16 @@ EstiloMenu=auto
 [MCP]
 ; Ruta a sql.exe de SQLcl 25.2 o superior para que Claude pueda consultar la base de datos. Si la rellenas, el
 ; plug-in se la pasa a Claude Code con --mcp-config (%APPDATA%\ClaudeCodePlsql\mcp-sqlcl.json), sin dejar nada en
-; las carpetas de trabajo. Claude solo puede consultar (SELECT): el plug-in bloquea el resto y te pide aprobación
-; en cada consulta.
+; las carpetas de trabajo. Claude solo puede consultar (SELECT): el plug-in bloquea el resto.
 ; Ejemplo: C:\sqlcl\bin\sql.exe
 RutaSqlcl=
+
+[BBDD]
+; Las BBDD que conectas con «Conectar a BBDD» valen para todos los expedientes del mismo cliente. El cliente sale de la
+; carpeta que contiene el expediente (saltando las de estado como «01.PENDIENTE INSTALAR REAL»). Si tus expedientes
+; están en <carpeta>\<cliente>\..., pon aquí esa carpeta para que el cliente sea siempre su primera subcarpeta.
+; Ejemplo: O:\Desarrollo
+CarpetaClientes=
 
 """;
 
@@ -230,6 +236,32 @@ function Comprobar-Consulta([string]$cmd) {
     elseif (-not $lista) { Bloquear 'falta la consulta (-Sql o -File).' }
 }
 
+# Llamada a plsql.ps1 del plug-in, que abre ficheros y ventanas en PL/SQL Developer (nunca ejecuta nada en ellas):
+#   & '<ruta>\ClaudeCodePlsql\plsql.ps1' -Abrir <fichero> | -Nuevo <fichero> -Desde <fichero> | -Ventana <tipo> [-Desde <fichero>] [-Bd <nombre>]
+function Comprobar-Plsql([string]$cmd) {
+    $c = $cmd.Trim()
+    $arg = '(?:''(?:[^'']|'''')*''|"[^"`]*"|[^\s''"`;|&<>(){}]+)'
+    $m = [regex]::Match($c, "^(?:&\s*|(?:pwsh|powershell)(?:\.exe)?(?:\s+-(?:NoProfile|NonInteractive|NoLogo|ExecutionPolicy\s+Bypass))*\s+-File\s+)(?<ruta>$arg)(?<resto>.*)$", 'Singleline')
+    if (-not $m.Success) { Bloquear "llama a plsql.ps1 asi: & '<ruta>\plsql.ps1' -Abrir <fichero> [-Bd <nombre>], sin nada mas en la linea." }
+    if ((Valor-Argumento $m.Groups['ruta'].Value) -notmatch '(?i)[\\/]ClaudeCodePlsql[\\/]plsql\.ps1$') { Bloquear 'solo se admite el plsql.ps1 del plug-in.' }
+    $resto = $m.Groups['resto'].Value
+    $p = [regex]::Match($resto, "\G\s+-(?<n>Abrir|Nuevo|Desde|Ventana|Bd)\s+(?<v>$arg)(?=\s|$)", 'IgnoreCase')
+    $pos = 0
+    while ($p.Success -and $p.Index -eq $pos) {
+        $pos = $p.Index + $p.Length
+        $v = Valor-Argumento $p.Groups['v'].Value
+        switch ($p.Groups['n'].Value) {
+            'Bd'      { if ($v -notmatch '^[A-Za-z0-9_]+$') { Bloquear '-Bd tiene que ser el nombre de una BD conectada.' } }
+            'Ventana' { if ($v -notmatch '^(sql|test|programa|comandos)$') { Bloquear '-Ventana es sql, test, programa o comandos.' } }
+            'Nuevo'   {
+                if ($v -match $credenciales -or $v -match '(?i)[\\/]ClaudeCodePlsql([\\/]|$)|[\\/]\.claude[\\/]') { Bloquear 'no se pueden crear ficheros en la configuracion del plug-in, de Claude Code ni de credenciales.' }
+            }
+        }
+        $p = $p.NextMatch()
+    }
+    if ($resto.Substring($pos).Trim()) { Bloquear "argumentos no permitidos en la llamada a plsql.ps1: '$($resto.Substring($pos).Trim())'." }
+}
+
 # Scripts que se ejecutan desde la consola: si por dentro se conectan a Oracle (sqlplus, sql de SQLcl, librerias de
 # conexion), se bloquean, vengan de una skill, de un plugin o de donde sea. Solo vale el envoltorio del plug-in.
 $accesoBbdd = '(?i)\bsqlplus\b|\bsqlcl\b|\bsql(\.exe)?\s+[-/]|\bsql\.exe\b|\bsqlldr\b|\bmkstore\b|oracledb|cx_Oracle|Oracle\.ManagedDataAccess|OracleClient|jdbc:oracle'
@@ -287,6 +319,10 @@ try {
             Comprobar-Consulta $cmd
             Permitir 'Consulta de solo lectura: pasa el filtro del plug-in.'
         }
+        if ($cmd -match '(?i)[\\/]plsql\.ps1') {
+            Comprobar-Plsql $cmd
+            Permitir 'Abre una ventana en PL/SQL Developer sin ejecutar nada.'
+        }
         $clientes = '(^|[\s;&|(''"`/\\])(sql|sqlplus|sqlcl|sqlldr|impdp|expdp|exp|imp|rman|dgmgrl|tnsping|orapki|mkstore)(\.exe|\.cmd|\.bat)?(?=$|[\s;&|)''"`])'
         if ($cmd -match "(?i)$clientes") { Bloquear 'no se pueden lanzar clientes de Oracle desde la consola; usa el consulta-bbdd.ps1 del plug-in.' }
         if ($cmd -match '(?i)oracledb|cx_Oracle|Oracle\.ManagedDataAccess|OracleClient|jdbc:oracle|Invoke-Sqlcmd|odbc') { Bloquear 'no se puede acceder a la base de datos desde la consola.' }
@@ -339,7 +375,12 @@ catch {
         "con -File y un .sql; -Lista dice qué BBDD tienes. Sin -Bd consulta la de desarrollo. " + bbdd +
         " Cuando consultes una que no sea la de desarrollo, di de cuál sale el dato. Nada de DML, DDL, PL/SQL ni COMMIT, " +
         "ni sqlplus, sql u otros scripts que se conecten por su cuenta, ni leer credenciales. Un hook del plug-in bloquea " +
-        "todo lo demás: si te bloquea, no busques otra vía; explica qué habría que ejecutar y deja que lo haga el usuario.";
+        "todo lo demás: si te bloquea, no busques otra vía; explica qué habría que ejecutar y deja que lo haga el usuario. " +
+        "Para abrir cosas en PL/SQL Developer (aunque esté cerrado: lo arranca) usa " +
+        $"& '{System.IO.Path.Combine(System.IO.Path.GetDirectoryName(consulta) ?? "", "plsql.ps1")}' con -Abrir <fichero>, " +
+        "-Nuevo <fichero> -Desde <fichero con el texto en UTF-8> (lo crea en Windows-1252 y nunca pisa uno que exista) o " +
+        "-Ventana sql|test|programa|comandos [-Desde <fichero>], y -Bd <nombre> para conectar la ventana a una de esas " +
+        "BBDD. No ejecuta nada: compilar y ejecutar lo hace el usuario.";
 
     /// <summary>Ajustes de Claude Code para las sesiones del plug-in (--settings): el hook de solo consultas.</summary>
     public static string SettingsJson(string hookPath)
@@ -659,6 +700,134 @@ if ($truncada) { $meta += " | SALIDA TRUNCADA: $($lineas.Count) lineas, mostrada
 ''
 $meta
 exit $codigo
+""";
+
+    /// <summary>
+    /// Abre ficheros y ventanas en PL/SQL Developer desde Claude Code (peticiones que atiende el plug-in). Se reescribe en
+    /// cada arranque en %APPDATA%\ClaudeCodePlsql\plsql.ps1.
+    /// </summary>
+    public const string PlsqlScript = """
+# Abre ficheros y ventanas en PL/SQL Developer desde Claude Code (lo escribe el plug-in en cada arranque).
+#
+# Uso:
+#   & '<ruta>\plsql.ps1' -Abrir <fichero> [-Bd <nombre>]
+#   & '<ruta>\plsql.ps1' -Nuevo <fichero> -Desde <fichero con el texto> [-Bd <nombre>]
+#   & '<ruta>\plsql.ps1' -Ventana sql|test|programa|comandos [-Desde <fichero con el texto>] [-Bd <nombre>]
+#
+#   -Abrir    abre un fichero que ya existe (el tipo de ventana sale de la extension).
+#   -Nuevo    crea el fichero con el texto de -Desde (en Windows-1252, CRLF y sin BOM, como los fuentes de LIBRA) y lo
+#             abre. Nunca pisa un fichero que ya exista.
+#   -Ventana  abre una ventana nueva sin fichero, con el texto de -Desde si se da. Nunca se ejecuta.
+#   -Bd       la ventana se conecta a esa BD: "desarrollo" o una de las conectadas en el proyecto de esta sesion
+#             (consulta-bbdd.ps1 -Lista dice cuales hay). Sin -Bd, la conexion que tenga PL/SQL Developer.
+#
+# Con PL/SQL Developer abierto, deja la peticion en %APPDATA%\ClaudeCodePlsql\peticiones y la atiende el plug-in (que
+# lee el mismo la contraseña: no va en la peticion). Si esta cerrado, lo arranca conectado a esa BD y luego abre lo
+# pedido.
+param(
+    [string]$Abrir,
+    [string]$Nuevo,
+    [string]$Desde,
+    [ValidateSet('sql', 'test', 'programa', 'comandos')]
+    [string]$Ventana,
+    [string]$Bd
+)
+
+$ErrorActionPreference = 'Stop'
+$dirPlugin = Join-Path $env:APPDATA 'ClaudeCodePlsql'
+$dirBbdd = Join-Path $dirPlugin 'bbdd'
+$dirPeticiones = Join-Path $dirPlugin 'peticiones'
+$utf8 = New-Object System.Text.UTF8Encoding $false
+
+function Rechazo([string]$mensaje, [int]$codigo = 2) {
+    [Console]::Error.WriteLine($mensaje)
+    exit $codigo
+}
+
+if (@($Abrir, $Nuevo, $Ventana | Where-Object { $_ }).Count -ne 1) { Rechazo 'Indica una sola accion: -Abrir, -Nuevo o -Ventana.' }
+
+# ---------------------------------------------------------------------------- la BD (mismas reglas que consulta-bbdd.ps1)
+$proyecto = $env:CLAUDE_PLSQL_PROYECTO
+$envFile = $null
+if ($Bd) {
+    if ($Bd -notmatch '^[A-Za-z0-9_]+$') { Rechazo "Nombre de BD no valido: '$Bd'." }
+    $Bd = $Bd.ToLowerInvariant()
+    if ($Bd -eq 'desarrollo') { $envFile = Join-Path $dirBbdd 'desarrollo.env' }
+    elseif ($proyecto -match '^[0-9a-f]{12}$') { $envFile = Join-Path $dirBbdd "$proyecto\$Bd.env" }
+    else { Rechazo 'Esta sesion no es de un proyecto del plug-in: solo se puede usar la BD de desarrollo.' 3 }
+    if (-not (Test-Path -LiteralPath $envFile)) { Rechazo "La BD '$Bd' no esta conectada en esta sesion. Se conectan con los botones de PL/SQL Developer." 3 }
+}
+
+# ---------------------------------------------------------------------------- el fichero
+$tipos = @{ sql = 1; test = 2; programa = 3; comandos = 4 }
+$peticion = [ordered]@{ accion = ''; fichero = ''; tipo = 0; texto = ''; bd = [string]$Bd; proyecto = [string]$proyecto }
+
+function Texto-De([string]$ruta) {
+    if (-not (Test-Path -LiteralPath $ruta -PathType Leaf)) { Rechazo "No existe el fichero $ruta." }
+    return [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $ruta).Path, $utf8)
+}
+
+if ($Abrir) {
+    if (-not (Test-Path -LiteralPath $Abrir -PathType Leaf)) { Rechazo "No existe el fichero $Abrir." }
+    $peticion.accion = 'abrir'
+    $peticion.fichero = (Resolve-Path -LiteralPath $Abrir).Path
+}
+elseif ($Nuevo) {
+    if (-not $Desde) { Rechazo 'Con -Nuevo hace falta -Desde: el fichero con el texto (en UTF-8).' }
+    $completo = [System.IO.Path]::GetFullPath($Nuevo)
+    if (Test-Path -LiteralPath $completo) { Rechazo "Ya existe ${completo}: no lo piso. Para abrirlo, usa -Abrir." }
+    $texto = (Texto-De $Desde).TrimStart([char]0xFEFF) -replace "`r`n", "`n" -replace "`n", "`r`n"
+    # Los fuentes de LIBRA van en Windows-1252: si algun caracter no existe ahi, mejor no crear el fichero
+    $w1252 = [System.Text.Encoding]::GetEncoding(1252, [System.Text.EncoderFallback]::ExceptionFallback, [System.Text.DecoderFallback]::ExceptionFallback)
+    try { $bytes = $w1252.GetBytes($texto) } catch { Rechazo 'El texto tiene caracteres que no existen en Windows-1252 (flechas, simbolos, emojis...): cambialos y vuelve a intentarlo.' }
+    New-Item -ItemType Directory -Force -Path (Split-Path $completo) | Out-Null
+    [System.IO.File]::WriteAllBytes($completo, $bytes)
+    Write-Output "Creado $completo (Windows-1252, CRLF, sin BOM)."
+    $peticion.accion = 'abrir'
+    $peticion.fichero = $completo
+}
+else {
+    $peticion.accion = 'ventana'
+    $peticion.tipo = $tipos[$Ventana]
+    if ($Desde) { $peticion.texto = (Texto-De $Desde).TrimStart([char]0xFEFF) -replace "`r`n", "`n" -replace "`n", "`r`n" }
+}
+
+# ---------------------------------------------------------------------------- a PL/SQL Developer
+New-Item -ItemType Directory -Force -Path $dirPeticiones | Out-Null
+$abierto = @(Get-Process plsqldev -ErrorAction SilentlyContinue).Count -gt 0
+
+if (-not $abierto) {
+    # Se arranca PL/SQL Developer, conectado a la BD si se ha pedido; la peticion la atiende el plug-in al activarse
+    $exe = $null
+    $ini = Join-Path $dirPlugin 'ClaudeCode.ini'
+    if (Test-Path -LiteralPath $ini) {
+        $l = [System.IO.File]::ReadAllLines($ini, $utf8) | Where-Object { $_ -match '^\s*DllInstalada\s*=' } | Select-Object -First 1
+        if ($l) { $c = Join-Path (Split-Path (Split-Path ($l -replace '^\s*DllInstalada\s*=\s*', ''))) 'plsqldev.exe'; if (Test-Path -LiteralPath $c) { $exe = $c } }
+    }
+    if (-not $exe) {
+        $exe = Get-ChildItem 'C:\Oracle\PLSQLDeveloper*\plsqldev.exe', "$env:ProgramFiles\PLSQL Developer*\plsqldev.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $exe) { Rechazo 'PL/SQL Developer esta cerrado y no encuentro plsqldev.exe para arrancarlo: abrelo y vuelve a intentarlo.' 4 }
+
+    $argumentos = @()
+    if ($envFile) {
+        $cfg = @{}
+        foreach ($linea in (Get-Content -LiteralPath $envFile -Encoding Default)) {
+            $i = $linea.IndexOf('='); if ($linea -notmatch '^\s*#' -and $i -gt 0) { $cfg[$linea.Substring(0, $i).Trim()] = $linea.Substring($i + 1).Trim() }
+        }
+        # Como lo arranca el lanzador de LIBRA: la clave va en la linea de comandos de plsqldev.exe
+        $argumentos += "userid=$($cfg['BD_USUARIO'])/`"$($cfg['BD_CLAVE'])`"@$($cfg['BD_HOST']):$($cfg['BD_PUERTO'])/$($cfg['BD_SERVICIO'])"
+        $peticion.bd = ''   # ya va conectado
+    }
+    Start-Process -FilePath $exe -ArgumentList $argumentos | Out-Null
+    Write-Output 'PL/SQL Developer arrancando; en cuanto cargue el plug-in abrira lo pedido.'
+}
+
+$f = Join-Path $dirPeticiones ("{0:yyyyMMddHHmmssfff}-{1}.json" -f (Get-Date), [guid]::NewGuid().ToString('N').Substring(0, 6))
+[System.IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject $peticion -Compress), $utf8)
+if ($abierto) { Write-Output 'Peticion enviada a PL/SQL Developer.' }
+exit 0
 """;
 
     // Mod de Claude Code con la franja de BBDD conectadas (%APPDATA%\ClaudeCodePlsql\mod-bbdd, cargado con --plugin-dir)

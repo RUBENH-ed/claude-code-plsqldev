@@ -292,10 +292,38 @@ internal static unsafe class Plugin
 
     private static string BbddDir => System.IO.Path.Combine(Config.Dir, "bbdd");
 
-    /// <summary>Identificador de una carpeta de trabajo para sus BBDD: 12 caracteres hexadecimales de su ruta.</summary>
+    /// <summary>
+    /// Carpeta del cliente de un expediente, para que todos sus desarrollos e incidencias compartan las BBDD: la
+    /// subcarpeta de CarpetaClientes donde está el expediente o, sin ese ajuste, la que lo contiene, saltando las de
+    /// estado como «01.PENDIENTE INSTALAR REAL». Null fuera de un expediente.
+    /// </summary>
+    private static string? ClientFolder(Workspace ws)
+    {
+        if (!ws.IsProject) return null;
+        string root = System.IO.Path.GetFullPath(ws.Root).TrimEnd('\\', '/');
+        if (Config.ClientsRoot.Length > 0)
+        {
+            string clients = System.IO.Path.GetFullPath(Config.ClientsRoot).TrimEnd('\\', '/') + "\\";
+            if (root.StartsWith(clients, StringComparison.OrdinalIgnoreCase))
+                return clients + root[clients.Length..].Split('\\', '/')[0];
+        }
+        string? parent = System.IO.Path.GetDirectoryName(root);
+        if (parent != null && System.Text.RegularExpressions.Regex.IsMatch(System.IO.Path.GetFileName(parent), @"^\d+\s*[.\-_ ]"))
+            parent = System.IO.Path.GetDirectoryName(parent);
+        return string.IsNullOrEmpty(System.IO.Path.GetFileName(parent ?? "")) ? null : parent;
+    }
+
+    /// <summary>A quién pertenecen las BBDD conectadas desde esta ventana: «del cliente X» o «de este proyecto».</summary>
+    private static string ScopeText(Workspace ws) =>
+        ClientFolder(ws) is string c ? $"del cliente {System.IO.Path.GetFileName(c)}" : "de este proyecto";
+
+    /// <summary>
+    /// Identificador del ámbito de las BBDD conectadas (el cliente del expediente o, si no se sabe, la carpeta de
+    /// trabajo): 12 caracteres hexadecimales de su ruta.
+    /// </summary>
     private static string ProjectId(Workspace ws)
     {
-        string root = System.IO.Path.GetFullPath(ws.Root).TrimEnd('\\', '/').ToLowerInvariant();
+        string root = System.IO.Path.GetFullPath(ClientFolder(ws) ?? ws.Root).TrimEnd('\\', '/').ToLowerInvariant();
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(root)))[..12].ToLowerInvariant();
     }
 
@@ -331,7 +359,7 @@ internal static unsafe class Plugin
             Win32.Message($"{origin} no parece una base de pruebas ni de desarrollo.\n\n" +
                           "Si es de producción, Claude podrá consultarla (solo lectura y con tu aprobación en cada consulta), " +
                           "y los datos que lea saldrán de tu equipo hacia Anthropic.\n\n" +
-                          $"¿La conecto en este proyecto ({ws.Label})?",
+                          $"¿La conecto en las BBDD {ScopeText(ws)}?",
                 Win32.MB_YESNO | Win32.MB_ICONWARNING) != Win32.IDYES)
             return;
 
@@ -339,7 +367,7 @@ internal static unsafe class Plugin
         string alta = System.IO.Path.Combine(Config.Dir, "alta-bbdd.ps1");
         WriteIfChanged(alta, Templates.AltaBbdd, new UTF8Encoding(true)); // con BOM para Windows PowerShell 5.1
         string input = "{" +
-            $"\"modo\":{Json(development ? "desarrollo" : "proyecto")},\"proyecto\":{Json(ProjectId(ws))},\"ruta\":{Json(ws.Root)}," +
+            $"\"modo\":{Json(development ? "desarrollo" : "proyecto")},\"proyecto\":{Json(ProjectId(ws))},\"ruta\":{Json(ClientFolder(ws) ?? ws.Root)}," +
             $"\"nombre\":{Json(dbName)},\"tipo\":{Json(kind)},\"usuario\":{Json(user)},\"clave\":{Json(password)},\"bd\":{Json(db)}," +
             $"\"tnsAdmin\":{Json(Environment.GetEnvironmentVariable("TNS_ADMIN") ?? "")},\"origen\":{Json(origin)}" + "}";
 
@@ -365,11 +393,11 @@ internal static unsafe class Plugin
         // el que deja alta-bbdd.ps1: el alias en minúsculas, con _ en lo que no sea letra, número o _
         string name = System.Text.RegularExpressions.Regex.Replace(dbName, "[^A-Za-z0-9_]", "_").ToLowerInvariant();
         string prompt =
-            $"He conectado en este proyecto la BD {origin} ({kind}). Consúltala con & '{WriteQueryScript()}' " +
+            $"He conectado la BD {origin} ({kind}) a las BBDD {ScopeText(ws)}. Consúltala con & '{WriteQueryScript()}' " +
             $"-Sql 'SELECT ...' -Bd {name}; la de desarrollo sigue siendo la de por defecto. " +
             "Compruébalo con SELECT USER FROM dual. Si el expediente tiene fuentes (cfstd, cfcliente), mira además si los " +
             "objetos que tocan existen en esa BD y si su versión difiere de la de desarrollo, y avísame de lo que cambie.";
-        Launch(ws, prompt, prompt, $"BD {origin} disponible para Claude en este proyecto");
+        Launch(ws, prompt, prompt, $"BD {origin} disponible para Claude ({ScopeText(ws)})");
     }
 
     /// <summary>Botón "Desconectar BBDD": borra las BBDD del proyecto de la ventana (la de desarrollo se queda).</summary>
@@ -379,21 +407,21 @@ internal static unsafe class Plugin
         string dir = System.IO.Path.Combine(BbddDir, ProjectId(ws));
         if (!Directory.Exists(dir))
         {
-            Win32.Message($"No hay BBDD conectadas en este proyecto ({ws.Label}): Claude solo tiene la de desarrollo.",
+            Win32.Message($"No hay BBDD conectadas {ScopeText(ws)}: Claude solo tiene la de desarrollo.",
                 Win32.MB_ICONINFORMATION);
             return;
         }
         Directory.Delete(dir, recursive: true);
-        Log.Info($"BBDD de {ws.Root} desconectadas.");
+        Log.Info($"BBDD {ScopeText(ws)} desconectadas ({ws.Root}).");
 
         if (Config.SidePanel && Win32.FindTopWindow(ClaudeTitle(ws)) != 0)
         {
-            const string prompt = "He desconectado las BBDD de este proyecto: ya solo tienes la de desarrollo.";
-            Launch(ws, prompt, prompt, "BBDD del proyecto desconectadas");
+            string prompt = $"He desconectado las BBDD {ScopeText(ws)}: ya solo tienes la de desarrollo.";
+            Launch(ws, prompt, prompt, $"BBDD {ScopeText(ws)} desconectadas");
         }
         else
         {
-            Ide.Status("BBDD del proyecto desconectadas: Claude solo tiene la de desarrollo.");
+            Ide.Status($"BBDD {ScopeText(ws)} desconectadas: Claude solo tiene la de desarrollo.");
         }
     }
 
@@ -433,11 +461,11 @@ internal static unsafe class Plugin
             : "Todavía no hay BD de desarrollo fijada: pide al usuario que la fije con el botón Fijar como BD de desarrollo. ");
         if (project.Count == 0)
         {
-            sb.Append("En este proyecto no hay más BBDD conectadas.");
+            sb.Append($"No hay más BBDD conectadas {ScopeText(ws)}.");
         }
         else
         {
-            sb.Append("BBDD conectadas en este proyecto: ");
+            sb.Append($"BBDD conectadas {ScopeText(ws)} (sirven para todos sus expedientes): ");
             sb.Append(string.Join("; ", project.Select(c => $"{c.Origin} ({c.Kind}), -Bd {c.Name}")));
             sb.Append('.');
         }
@@ -453,6 +481,8 @@ internal static unsafe class Plugin
         Directory.CreateDirectory(Config.Dir);
         string file = System.IO.Path.Combine(Config.Dir, "consulta-bbdd.ps1");
         WriteIfChanged(file, Templates.ConsultaBbdd, new UTF8Encoding(true)); // con BOM para Windows PowerShell 5.1
+        // Junto a él, el que abre ficheros y ventanas en PL/SQL Developer
+        WriteIfChanged(System.IO.Path.Combine(Config.Dir, "plsql.ps1"), Templates.PlsqlScript, new UTF8Encoding(true));
         return file;
     }
 
@@ -787,6 +817,92 @@ internal static unsafe class Plugin
         }
     }
 
+    // ================================================================ peticiones de Claude (plsql.ps1)
+
+    /// <summary>
+    /// Desde el temporizador: atiende las peticiones que deja plsql.ps1 en %APPDATA%\ClaudeCodePlsql\peticiones (abrir
+    /// un fichero o una ventana nueva, con la conexión de una BD si se pide). Nunca se ejecuta nada en la ventana. La
+    /// contraseña no viaja en la petición: la lee el plug-in del .env de esa BD.
+    /// </summary>
+    private static void CheckRequests()
+    {
+        string dir = System.IO.Path.Combine(Config.Dir, "peticiones");
+        if (!Directory.Exists(dir)) return;
+        foreach (string file in Directory.GetFiles(dir, "*.json").OrderBy(f => f, StringComparer.Ordinal))
+        {
+            string json;
+            try
+            {
+                json = File.ReadAllText(file);
+                File.Delete(file);
+            }
+            catch (IOException)
+            {
+                continue; // todavía la están escribiendo: en el siguiente tic
+            }
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var r = doc.RootElement;
+                string action = Prop(r, "accion"), path = Prop(r, "fichero"), text = Prop(r, "texto"), db = Prop(r, "bd");
+                int type = r.TryGetProperty("tipo", out var t) && t.TryGetInt32(out int n) ? n : 0;
+
+                int ix = -1;
+                if (db.Length > 0)
+                {
+                    ix = ConnectionFor(db, Prop(r, "proyecto"));
+                    if (ix < 0)
+                    {
+                        Win32.Message($"Claude ha pedido abrir una ventana con la BD «{db}», pero no he podido conectarla. " +
+                                      "Comprueba que sigue dada de alta (botón Conectar a BBDD).", Win32.MB_ICONWARNING);
+                        continue;
+                    }
+                }
+
+                bool ok = action == "abrir" ? Ide.OpenFile(type, path) : Ide.CreateWindow(type is >= 1 and <= 4 ? type : 1, text);
+                if (!ok)
+                {
+                    Ide.Status(action == "abrir" ? $"No se ha podido abrir {path}" : "No se ha podido crear la ventana");
+                    continue;
+                }
+                if (ix >= 0) Ide.SetWindowConnection(ix);
+                Win32.BringToFront(Ide.MainWindow);
+                Ide.Status(action == "abrir"
+                    ? $"Claude ha abierto {System.IO.Path.GetFileName(path)}{(db.Length > 0 ? $" con la BD {db}" : "")}"
+                    : $"Claude ha abierto una ventana nueva{(db.Length > 0 ? $" con la BD {db}" : "")}");
+            }
+            catch (Exception e)
+            {
+                Log.Error(e);
+            }
+        }
+    }
+
+    /// <summary>Conecta en PL/SQL Developer una de las BBDD dadas de alta para Claude. Devuelve su índice o -1.</summary>
+    private static int ConnectionFor(string name, string scope)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z0-9_]+$")) return -1;
+        string env = name == "desarrollo"
+            ? System.IO.Path.Combine(BbddDir, "desarrollo.env")
+            : System.Text.RegularExpressions.Regex.IsMatch(scope, "^[0-9a-f]{12}$") ? System.IO.Path.Combine(BbddDir, scope, name + ".env") : "";
+        if (env.Length == 0 || !File.Exists(env)) return -1;
+
+        // Los .env van en Windows-1252, como los escribe alta-bbdd.ps1
+        var cfg = new Dictionary<string, string>();
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        foreach (string line in File.ReadAllLines(env, Encoding.GetEncoding(1252)))
+        {
+            int eq = line.IndexOf('=');
+            if (eq > 0 && !line.TrimStart().StartsWith('#')) cfg[line[..eq].Trim()] = line[(eq + 1)..].Trim();
+        }
+        if (!cfg.TryGetValue("BD_USUARIO", out string? user) || !cfg.TryGetValue("BD_CLAVE", out string? password) ||
+            !cfg.TryGetValue("BD_HOST", out string? host) || !cfg.TryGetValue("BD_PUERTO", out string? port) ||
+            !cfg.TryGetValue("BD_SERVICIO", out string? service))
+            return -1;
+        return Ide.Connect(user, password, $"{host}:{port}/{service}");
+    }
+
     private static List<string> Strings(System.Text.Json.JsonElement e, string name)
     {
         var list = new List<string>();
@@ -812,6 +928,7 @@ internal static unsafe class Plugin
         try
         {
             CheckUpdate();
+            CheckRequests();
             PlacePending();
             CheckActiveWindow();
         }

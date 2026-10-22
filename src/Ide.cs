@@ -29,6 +29,11 @@ internal static unsafe class Ide
     private const int CB_IDE_GetSelectedText = 31;
     private const int CB_IDE_SetText = 34;
     private const int CB_IDE_SetStatusMessage = 35;
+    private const int CB_IDE_CreateWindow = 20;
+    private const int CB_IDE_OpenFile = 21;
+    private const int CB_IDE_AddConnection = 242;
+    private const int CB_IDE_ConnectConnection = 243;
+    private const int CB_IDE_SetWindowConnection = 246;
     private const int CB_IDE_CreatePopupItem = 69;
     private const int CB_IDE_CreateToolButton = 150;
     private const int CB_IDE_GetWindowObject = 110;
@@ -44,7 +49,8 @@ internal static unsafe class Ide
     private static nint _sysVersion, _connected, _getConnectionInfo, _getWindowType, _getWindowHandle,
         _getChildHandle, _filename, _getText, _getSelectedText, _setText, _setStatusMessage,
         _createPopupItem, _getWindowObject, _getCursorY, _setCursor, _tabInfo, _tabIndex,
-        _windowHasEditor, _plugInSetting, _getConnectionInfoEx, _getWindowConnection, _createToolButton;
+        _windowHasEditor, _plugInSetting, _getConnectionInfoEx, _getWindowConnection, _createToolButton,
+        _createWindow, _openFile, _addConnection, _connectConnection, _setWindowConnection;
 
     public static void Register(int index, nint addr)
     {
@@ -63,6 +69,11 @@ internal static unsafe class Ide
             case CB_IDE_SetStatusMessage: _setStatusMessage = addr; break;
             case CB_IDE_CreatePopupItem: _createPopupItem = addr; break;
             case CB_IDE_CreateToolButton: _createToolButton = addr; break;
+            case CB_IDE_CreateWindow: _createWindow = addr; break;
+            case CB_IDE_OpenFile: _openFile = addr; break;
+            case CB_IDE_AddConnection: _addConnection = addr; break;
+            case CB_IDE_ConnectConnection: _connectConnection = addr; break;
+            case CB_IDE_SetWindowConnection: _setWindowConnection = addr; break;
             case CB_IDE_GetWindowObject: _getWindowObject = addr; break;
             case CB_IDE_GetCursorY: _getCursorY = addr; break;
             case CB_IDE_SetCursor: _setCursor = addr; break;
@@ -272,6 +283,47 @@ internal static unsafe class Ide
     {
         if (_setCursor != 0) ((delegate* unmanaged[Cdecl]<int, int, void>)_setCursor)(x, y);
     }
+
+    /// <summary>Ventana nueva (1 = SQL, 2 = Test, 3 = Programa, 4 = Comandos) con ese texto. Nunca se ejecuta.</summary>
+    public static bool CreateWindow(int windowType, string text)
+    {
+        if (_createWindow == 0) return false;
+        fixed (byte* t = H(text))
+        {
+            ((delegate* unmanaged[Cdecl]<int, byte*, int, void>)_createWindow)(windowType, t, 0);
+        }
+        return true;
+    }
+
+    /// <summary>Abre un fichero en una ventana nueva; con tipo 0, PL/SQL Developer lo decide por la extensión.</summary>
+    public static bool OpenFile(int windowType, string file)
+    {
+        if (_openFile == 0) return false;
+        fixed (byte* f = H(file))
+        {
+            return ((delegate* unmanaged[Cdecl]<int, byte*, int>)_openFile)(windowType, f) != 0;
+        }
+    }
+
+    /// <summary>Da de alta (o encuentra) una conexión y la conecta. Devuelve su índice, o -1 si no se ha podido.</summary>
+    public static int Connect(string user, string password, string database)
+    {
+        if (_addConnection == 0 || _connectConnection == 0) return -1;
+        int ix;
+        fixed (byte* u = H(user))
+        fixed (byte* p = H(password))
+        fixed (byte* d = H(database))
+        fixed (byte* a = H(""))
+        {
+            ix = ((delegate* unmanaged[Cdecl]<byte*, byte*, byte*, byte*, int>)_addConnection)(u, p, d, a);
+        }
+        if (ix < 0) return -1;
+        return ((delegate* unmanaged[Cdecl]<int, int>)_connectConnection)(ix) != 0 ? ix : -1;
+    }
+
+    /// <summary>Asigna la conexión a la ventana activa.</summary>
+    public static bool SetWindowConnection(int ix) =>
+        _setWindowConnection != 0 && ((delegate* unmanaged[Cdecl]<int, int>)_setWindowConnection)(ix) != 0;
 
     /// <summary>Icono de una opción del menú o de la cinta (mismo índice que CreateMenuItem): fichero .bmp, .png o .svg.</summary>
     public static void CreateToolButton(int index, string name, string bitmapFile)
