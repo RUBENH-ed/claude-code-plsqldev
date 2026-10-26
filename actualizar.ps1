@@ -4,6 +4,7 @@
 #   1. Baja la ultima version publicada (rama "publicado" del repositorio, en %APPDATA%\ClaudeCodePlsql\repo).
 #   2. Si la DLL ha cambiado, la deja en su sitio: la que esta cargada se renombra a .old (Windows lo permite) y la
 #      nueva se aplica al reiniciar PL/SQL Developer.
+#   2b. Deja el panel de sesiones en %APPDATA%\ClaudeCodePlsql\panel-app\<version> (y actual.txt apuntando a el).
 #   3. Pone al dia las skills elegidas al instalar en ~/.claude/skills. Nunca pisa una skill que no haya puesto el
 #      plug-in (las marca con el fichero .claudecodeplsql); si coincide el nombre, lo apunta como conflicto.
 #   4. Solo en el equipo de quien mantiene las skills (PublicarSkills=si): las copia al repositorio y las publica.
@@ -111,6 +112,39 @@ try {
             $msg = $_.Exception.Message
             if ($msg -notmatch 'antivirus') { $msg = "No he podido dejar la DLL nueva en $dll ($msg). Puede que haga falta ser administrador para escribir en esa carpeta." }
             $estado.errores += $msg
+        }
+    }
+
+    # ------------------------------------------------------------------------ 2b. el panel de sesiones
+    # Se usa desde una copia por version (panel-app\<version>), no desde el repositorio: los ficheros de un panel en
+    # marcha estan en uso y el reset de la proxima actualizacion no podria sustituirlos.
+    $panelRepo = Join-Path $repo 'panel'
+    $fVerPanel = Join-Path $panelRepo 'VERSION'
+    if (Test-Path -LiteralPath $fVerPanel) {
+        try {
+            $verPanel = ([System.IO.File]::ReadAllText($fVerPanel)).Trim() -replace '[^\w.-]', ''
+            if (-not $verPanel) { throw 'la version del panel esta vacia.' }
+            $dirApps = Join-Path $dirPlugin 'panel-app'
+            $destino = Join-Path $dirApps $verPanel
+            if (-not (Test-Path -LiteralPath (Join-Path $destino 'anfitrion.js'))) {
+                New-Item -ItemType Directory -Force -Path $dirApps | Out-Null
+                $tmp = "$destino.tmp"
+                if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
+                Copy-Item -LiteralPath $panelRepo -Destination $tmp -Recurse -Force
+                if (Test-Path -LiteralPath $destino) { Remove-Item -LiteralPath $destino -Recurse -Force }
+                Rename-Item -LiteralPath $tmp -NewName (Split-Path $destino -Leaf)
+                $estado['panel'] = $verPanel
+            }
+            [System.IO.File]::WriteAllText((Join-Path $dirApps 'actual.txt'), $destino, $utf8)
+            # Las versiones anteriores se borran cuando ya no hay ningun proceso del panel usandolas
+            $enUso = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.CommandLine })
+            foreach ($d in Get-ChildItem -LiteralPath $dirApps -Directory) {
+                if ($d.FullName -eq $destino) { continue }
+                if ($enUso | Where-Object { $_.IndexOf($d.FullName, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) { continue }
+                Remove-Item -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            $estado.errores += "No he podido instalar el panel de sesiones: $($_.Exception.Message)"
         }
     }
 

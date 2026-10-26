@@ -1,5 +1,17 @@
 # Cambios
 
+## 1.8 (EDISA)
+
+- **Panel de sesiones.** Botón nuevo en la cinta (grupo *Sesiones*): abre una página local con todas las sesiones de
+  Claude abiertas desde el plug-in. Cada una con su piloto de estado (trabajando, pide permiso, te espera, en reposo,
+  cerrada) y lo que está haciendo; su terminal en directo, en la que puedes escribir; la actividad (mensajes,
+  herramientas, permisos, respuestas); la vista *Todas* con todas las terminales a la vez, y avisos del navegador.
+  En Windows Terminal todo sigue igual. Necesita Node.js 18 o superior; sin él, Claude se abre como antes.
+- Claves nuevas en `ClaudeCode.ini`: `PanelSesiones`, `RutaNode` y `RutaPanel` (sección `[Panel]`).
+- El hook de solo consultas protege también la carpeta de claves del panel (`%APPDATA%\ClaudeCodePlsql\panel`).
+- `actualizar.ps1` instala y pone al día el panel en `%APPDATA%\ClaudeCodePlsql\panel-app`; `instalar.ps1` comprueba
+  Node.js. GitHub Actions prueba el panel y lo publica con sus piezas de Windows.
+
 ## 1.7 (EDISA)
 
 - **Claude abre cosas en PL/SQL Developer** con `plsql.ps1`: un fichero (`-Abrir`), un fichero nuevo que crea en

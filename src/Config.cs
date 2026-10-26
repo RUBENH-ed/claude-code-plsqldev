@@ -29,6 +29,9 @@ internal static class Config
     public static bool ContinueConversation = true; // RetomarConversacion: abrir Claude con --continue
     public static bool SidePanel = true;           // PanelLateral: una ventana de Claude por carpeta, a la derecha del IDE
     public static int PanelPercent = 35;           // AnchoPanel: % del ancho de la pantalla para Claude (20-60)
+    public static string PanelMode = "auto";       // PanelSesiones: auto (si hay Node.js y panel) | si | no
+    public static string NodePath = "";            // RutaNode: node.exe (vacío = el del PATH o el de Program Files)
+    public static string PanelPath = "";           // RutaPanel: carpeta del panel (vacío = la que instala actualizar.ps1)
 
     /// <summary>Último expediente usado (estado.ini). Se ofrece para las ventanas que no son de un fichero de expediente.</summary>
     public static string LastProject = "";
@@ -69,6 +72,9 @@ internal static class Config
                     case "retomarconversacion": ContinueConversation = YesNo(value, true); break;
                     case "panellateral": SidePanel = YesNo(value, true); break;
                     case "anchopanel": if (int.TryParse(value.TrimEnd('%'), out int pct)) PanelPercent = Math.Clamp(pct, 20, 60); break;
+                    case "panelsesiones": PanelMode = Choice(value.Replace("í", "i"), "auto", "auto", "si", "no"); break;
+                    case "rutanode": NodePath = value.Trim('"'); break;
+                    case "rutapanel": PanelPath = value.Trim('"').TrimEnd('\\', '/'); break;
                 }
             }
         }

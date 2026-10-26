@@ -27,7 +27,8 @@ internal static unsafe class Plugin
     // Índices de menú (CreateMenuItem / OnMenuClick)
     public const int MenuOpen = 3, MenuAskSelection = 4, MenuPull = 5, MenuCopyRef = 6, MenuFolder = 8, MenuConfig = 9,
         MenuConnect = 11, MenuDisconnect = 12, MenuSetDev = 13,
-        MenuCompare = 15, MenuReview = 16, MenuExplainError = 17, MenuDocs = 18, MenuInstall = 19;
+        MenuCompare = 15, MenuReview = 16, MenuExplainError = 17, MenuDocs = 18, MenuInstall = 19,
+        MenuSessions = 21;
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly Dictionary<int, Link> Links = new();
@@ -105,6 +106,7 @@ internal static unsafe class Plugin
                 case MenuExplainError: ExplainError(); break;
                 case MenuDocs: ProjectTask(Prompts.DocsTask, "Claude prepara la documentación del expediente"); break;
                 case MenuInstall: ProjectTask(Prompts.InstallTask, "Claude prepara la instalación del expediente"); break;
+                case MenuSessions: Panel.Open(); break;
             }
         }
         finally
@@ -1054,6 +1056,19 @@ internal static unsafe class Plugin
             options.Add("--mcp-config");
             options.Add(PsQuote(mcpFile));
         }
+        // Panel de sesiones: la sesión se abre dentro de su anfitrión, que la comparte con el panel, y el mod del panel
+        // le cuenta lo que hace Claude. Sin Node.js o sin panel, Claude se abre como siempre.
+        var panel = Panel.Available();
+        if (panel != null)
+        {
+            options.Add("--plugin-dir");
+            options.Add(PsQuote(System.IO.Path.Combine(panel.Value.Dir, "mod")));
+        }
+        else if (Config.PanelMode == "si")
+        {
+            Log.Info("Sesión sin panel: " + Panel.LastProblem);
+        }
+
         if (Config.ExtraArgs.Length > 0) options.Add(Config.ExtraArgs);
         string opts = options.Count > 0 ? " " + string.Join(" ", options) : "";
 
@@ -1093,13 +1108,20 @@ internal static unsafe class Plugin
 
         try
         {
+            // Lo que se ejecuta en la ventana: PowerShell con el lanzador o, con el panel, el anfitrión que lo envuelve
+            string exe = Config.Shell, args = psArgs;
+            if (panel != null)
+            {
+                exe = panel.Value.Node;
+                args = Panel.HostArguments(panel.Value.Dir, title, ws.Root, $"{Config.Shell} {psArgs}");
+            }
             ProcessStartInfo psi = useWt
-                ? new ProcessStartInfo(File.Exists(wt) ? wt : "wt.exe", $"-d {Quote(ws.Root)} --title \"{title}\" {Config.Shell} {psArgs}")
-                : new ProcessStartInfo(Config.Shell, psArgs);
+                ? new ProcessStartInfo(File.Exists(wt) ? wt : "wt.exe", $"-d {Quote(ws.Root)} --title \"{title}\" {Panel.Arg(exe)} {args}")
+                : new ProcessStartInfo(exe, args);
             psi.UseShellExecute = true;
             psi.WorkingDirectory = ws.Root;
             Process.Start(psi);
-            Ide.Status(status);
+            Ide.Status(panel != null ? status + " (también en el panel de sesiones)" : Config.PanelMode == "si" ? $"{status}. Sin panel de sesiones: {Panel.LastProblem}" : status);
             if (Config.SidePanel)
             {
                 _placeTitle = title;
@@ -1110,7 +1132,7 @@ internal static unsafe class Plugin
         catch (Exception e)
         {
             Log.Error(e);
-            Win32.Message($"No se pudo abrir la terminal ({(useWt ? "Windows Terminal" : Config.Shell)}):\n\n{e.Message}\n\n" +
+            Win32.Message($"No se pudo abrir la terminal ({(useWt ? "Windows Terminal" : panel != null ? "Node.js" : Config.Shell)}):\n\n{e.Message}\n\n" +
                           "Revisa Terminal y Shell en la configuración del plug-in.", Win32.MB_ICONERROR);
             return false;
         }

@@ -53,6 +53,20 @@ Sincronizar=preguntar
 ; auto = cinta (versión 12 o superior) o menú clásico; cinta; clasico  (requiere reiniciar PL/SQL Developer)
 EstiloMenu=auto
 
+[Panel]
+; Panel de sesiones: una página en tu equipo (127.0.0.1) con todas las sesiones de Claude abiertas desde el plug-in.
+; Ves la terminal de cada una en directo, escribes en ella desde el panel y sabes si está trabajando, si pide
+; permiso o si te espera. Se abre con el botón «Panel de sesiones». Necesita Node.js 18 o superior.
+; auto = se usa si están Node.js y el panel; si = igual, pero avisa en la barra de estado cuando no se puede usar;
+; no = Claude se abre como antes, sin panel.
+PanelSesiones=auto
+
+; Ruta a node.exe si no está en el PATH (vacío = el del PATH o el de C:\Program Files\nodejs)
+RutaNode=
+
+; Carpeta del panel (vacío = la que deja la actualización automática en %APPDATA%\ClaudeCodePlsql\panel-app)
+RutaPanel=
+
 [MCP]
 ; Ruta a sql.exe de SQLcl 25.2 o superior para que Claude pueda consultar la base de datos. Si la rellenas, el
 ; plug-in se la pasa a Claude Code con --mcp-config (%APPDATA%\ClaudeCodePlsql\mcp-sqlcl.json), sin dejar nada en
@@ -280,8 +294,8 @@ function Comprobar-Scripts([string]$cmd) {
     }
 }
 
-# Rutas de credenciales: los .env, wallets y la carpeta de BBDD del plug-in
-$credenciales = '(?i)\.env$|[\\/]ClaudeCodePlsql[\\/]bbdd([\\/]|$)|[\\/]\.secrets([\\/]|$)|wallet'
+# Rutas de credenciales: los .env, wallets, la carpeta de BBDD del plug-in y la del panel de sesiones (sus claves)
+$credenciales = '(?i)\.env$|[\\/]ClaudeCodePlsql[\\/](bbdd|panel)([\\/]|$)|[\\/]\.secrets([\\/]|$)|wallet'
 
 try {
     [Console]::InputEncoding = [System.Text.Encoding]::UTF8
@@ -1000,6 +1014,9 @@ export const register: Register = on => {
             Svg("""<circle cx="10.5" cy="10.5" r="7.5" fill="none" stroke="#EB5757" stroke-width="1.5"/><path d="M10.5 6v5.5" stroke="#EB5757" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.5" cy="14.6" r="1.1" fill="#EB5757"/>""")),
         (Plugin.MenuDocs, "Documentación del expediente",
             Svg("""<path d="M7.5 2.5h6.5l3 3v10.5h-9.5z" fill="none" stroke="#434A54"/><path d="M5 5.5v13h9" fill="none" stroke="#434A54"/><path d="M10 8.5h4.5M10 11h4.5M10 13.5h3" stroke="#2F80ED" stroke-width="1.2" stroke-linecap="round"/>""")),
+        // Tres pilotos (trabajando, te espera, pide permiso), como en el propio panel; botón grande
+        (Plugin.MenuSessions, "Panel de sesiones",
+            Svg("""<rect x="1.5" y="2.5" width="18" height="16" rx="2.5" fill="none" stroke="#434A54" stroke-width="1.3"/><rect x="5" y="6" width="2.6" height="9" rx="1.3" fill="#E9B44C"/><rect x="9.2" y="6" width="2.6" height="9" rx="1.3" fill="#27AE60"/><rect x="13.4" y="6" width="2.6" height="9" rx="1.3" fill="#EB5757"/>""", 37)),
         (Plugin.MenuInstall, "Preparar instalación",
             Svg("""<path d="M3.5 7l7-3.5 7 3.5v8l-7 3.5-7-3.5z" fill="none" stroke="#434A54" stroke-linejoin="round"/><path d="M3.5 7l7 3.5 7-3.5M10.5 10.5v8" fill="none" stroke="#434A54" stroke-linejoin="round"/><path d="M14 2v4M12.5 4.5L14 6l1.5-1.5" fill="none" stroke="#27AE60" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>""")),
     };

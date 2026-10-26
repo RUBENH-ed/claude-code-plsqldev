@@ -34,6 +34,7 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
 | **Explicar error** | Copia el error de PL/SQL Developer y pulsa: Claude explica la causa y cómo arreglarlo (si no hay nada copiado, lo busca en `ALL_ERRORS`). |
 | **Documentación** | En un expediente: A18 y manual de desarrollo con sus skills. |
 | **Preparar instalación** | En un expediente: lista y orden de compilación de los fuentes y el script de instalación. |
+| **Panel de sesiones** | Abre el panel con todas las sesiones de Claude abiertas desde el plug-in, en directo (ver *Panel de sesiones*). |
 
 ### Cómo funciona
 
@@ -56,11 +57,54 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
 A Claude solo se le dice `usuario@base_de_datos`, nunca la contraseña. El plug-in solo la lee con los botones de
 base de datos, que la guardan en un `.env` de tu perfil local (ver más abajo).
 
+## Panel de sesiones
+
+Una página en tu propio equipo (`http://127.0.0.1:47811`, en una ventana de Edge sin pestañas) con **todas las sesiones
+de Claude que has abierto desde el plug-in**:
+
+- **La lista**, con un piloto de color por sesión: *trabajando* (ámbar), *pide permiso* (rojo, parpadea), *te espera*
+  (verde: ha terminado y espera tu mensaje), *en reposo* o *cerrada*. Debajo, lo que está haciendo en ese momento
+  («Bash: git status», «Edit: PKG_FACTURAS.pkb», «Pide permiso para Bash: ...»).
+- **La terminal de la sesión elegida, en directo.** Puedes escribir en ella como en Windows Terminal (o en la caja de
+  abajo: Intro envía, Mayús+Intro salta de línea), interrumpir con *Interrumpir* (tecla Esc) o cerrarla.
+- **La actividad**: tus mensajes, las herramientas que ha usado, los permisos que ha pedido y el principio de cada
+  respuesta.
+- **Todas**: las terminales de todas las sesiones a la vez, en pequeño. Pulsa una para ir a ella.
+- **Avisos** del navegador cuando una sesión pide permiso o termina y no la estás mirando (actívalos con el enlace de
+  abajo a la izquierda).
+
+En la ventana de Windows Terminal no cambia nada: la sesión se ve y se usa igual, y lo que escribas en un sitio aparece
+en el otro. Se usa tu sesión de Claude Code tal cual (tu cuenta, también Enterprise): el panel no habla con Anthropic
+ni con nada de fuera de tu equipo.
+
+**Cómo funciona.** Con el panel, el plug-in abre cada sesión dentro de un pequeño programa de Node.js (`anfitrion.js`)
+que la comparte con el servidor del panel (`servidor.js`); el servidor se arranca solo con la primera sesión y se para
+tras 20 minutos sin sesiones ni panel abierto. Un mod de Claude Code (`panel\mod`, cargado con `--plugin-dir`) le
+cuenta al panel lo que hace Claude; solo observa, nunca cambia una decisión ni un permiso.
+
+**Requisitos.** Node.js 18 o superior (`winget install OpenJS.NodeJS.LTS`). Si no está, o algo del panel falla, el
+plug-in abre Claude como siempre (`PanelSesiones=no` lo desactiva). El panel lo instala y lo pone al día
+`actualizar.ps1` en `%APPDATA%\ClaudeCodePlsql\panel-app`.
+
+**Seguridad.** Solo escucha en `127.0.0.1`. Para entrar hace falta un enlace de un solo uso que genera el botón
+*Panel de sesiones*; después, una cookie de tu navegador. Las claves están en `%APPDATA%\ClaudeCodePlsql\panel` (solo
+tu usuario de Windows) y el hook de solo consultas impide que Claude las lea. Una página web cualquiera no puede hablar
+con el panel (se comprueban `Host` y `Origin`). Ojo: quien abre el panel puede escribir en tus sesiones, igual que
+quien se sienta en tu teclado.
+
+**Límites.**
+- Solo aparecen las sesiones abiertas desde el plug-in; un `claude` lanzado a mano no.
+- La sesión vive en su ventana: si cierras la ventana de Windows Terminal, la sesión termina (en el panel queda como
+  *cerrada*, con su última pantalla).
+- En la ventana de la terminal, Mayús+Intro llega como Intro: para saltar de línea usa `\` + Intro.
+- El tamaño de la terminal lo manda la ventana de Windows Terminal; el panel ajusta la letra para que quepa.
+
 ## Requisitos
 
 - PL/SQL Developer 12 o superior (con cinta). Funciona también con el menú clásico (`EstiloMenu=clasico`).
 - Claude Code instalado en Windows y accesible como `claude` (o pon la ruta en `ComandoClaude`).
 - Windows Terminal (opcional; si no está, se usa una ventana de PowerShell).
+- Node.js 18 o superior, solo para el panel de sesiones (opcional).
 - Para compilar: SDK de **.NET 10** y Visual Studio 2022/2026 o *Build Tools* con la carga de trabajo
   **Desarrollo para el escritorio con C++** (NativeAOT la usa para enlazar). En el equipo donde se usa
   la DLL no hace falta .NET.
@@ -156,6 +200,9 @@ La primera vez se crea `%APPDATA%\ClaudeCodePlsql\ClaudeCode.ini` con la configu
 | `ArgumentosExtra` | *(vacío)* | Por ejemplo `--model opus` o `--permission-mode acceptEdits`. |
 | `Sincronizar` | `preguntar` | `preguntar`, `automatico` (carga sin preguntar si no has tocado el editor) o `no`. |
 | `EstiloMenu` | `auto` | `cinta` o `clasico` si el menú no aparece donde debe (reinicia el IDE). |
+| `PanelSesiones` | `auto` | `auto`: abre las sesiones con el panel si están Node.js y el panel; `si`: igual, pero avisa en la barra de estado cuando no se puede; `no`: sin panel. |
+| `RutaNode` | *(vacío)* | Ruta a `node.exe` si no está en el `PATH` ni en `C:\Program Files\nodejs`. |
+| `RutaPanel` | *(vacío)* | Carpeta del panel, si no quieres la que instala la actualización. |
 | `RutaSqlcl` | *(vacío)* | Ruta a `sql.exe` de SQLcl 25.2+ para que Claude consulte la base de datos (ver abajo). |
 
 El plug-in guarda en `%APPDATA%\ClaudeCodePlsql\estado.ini` el último expediente usado.
@@ -225,6 +272,10 @@ la carpeta del expediente.
 - **No se abre Claude**: revisa `ComandoClaude` y `Terminal`. La ventana de PowerShell explica el error.
   Si tu empresa bloquea los scripts de PowerShell por directiva de grupo, el lanzador (`-ExecutionPolicy Bypass`)
   no podrá ejecutarse; en ese caso coméntamelo y lo cambiamos a un `.cmd`.
+- **El panel no se abre o las sesiones no salen en él**: en `plugin.log` está el motivo (falta Node.js, la comprobación
+  del panel ha fallado...). El servidor deja su registro en `%APPDATA%\ClaudeCodePlsql\panel\servidor.log`. Si el
+  puerto 47811 lo usa otro programa, pon otro en la variable de entorno `PANEL_PUERTO`. Mientras tanto, Claude se
+  abre como siempre.
 - **Errores internos**: `%APPDATA%\ClaudeCodePlsql\plugin.log`.
 
 ## Estructura
@@ -237,6 +288,13 @@ src/Config.cs      lectura de ClaudeCode.ini
 src/Workspace.cs   carpeta de trabajo (expediente o general), textos para Claude y comprobación de Windows-1252
 src/Templates.cs   ClaudeCode.ini, los CLAUDE.md y el JSON de SQLcl
 src/Win32.cs       MessageBox, temporizador y portapapeles
+src/Panel.cs       panel de sesiones: busca Node.js y el panel, abre las sesiones con el anfitrión
+panel/servidor.js  servidor del panel (127.0.0.1): sesiones, navegadores y avisos del mod
+panel/anfitrion.js envuelve cada sesión en una pseudoterminal y la comparte con el servidor
+panel/abrir.js     abre el panel en el navegador con un enlace de un solo uso (botón Panel de sesiones)
+panel/web/         la página del panel (xterm.js para las terminales)
+panel/mod/         mod de Claude Code que avisa al panel de lo que hace Claude
+panel/pruebas/     prueba de punta a punta (npm run prueba, en Linux; la ejecuta GitHub Actions)
 ```
 
 Los índices y firmas de los callbacks siguen la documentación del Plug-In interface que viene con

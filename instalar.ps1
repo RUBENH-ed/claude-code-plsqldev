@@ -59,6 +59,18 @@ if ($git) { Bien "Git: $git" } else { Mal 'Git no esta instalado (hace falta par
 $claude = @((Join-Path $env:USERPROFILE '.local\bin\claude.exe'), (Get-Command claude -ErrorAction SilentlyContinue).Source) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if ($claude) { Bien "Claude Code: $claude" } else { Ojo 'No encuentro Claude Code (claude.exe). Instalalo antes de usar el plug-in; si esta en otra ruta, ponla en ComandoClaude.' }
 
+# Node.js: solo para el panel de sesiones (opcional). Sin el, Claude se abre como siempre.
+$node = (Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+if (-not $node -and (Test-Path "$env:ProgramFiles\nodejs\node.exe")) { $node = "$env:ProgramFiles\nodejs\node.exe" }
+$verNode = if ($node) { (& $node --version 2>$null) -replace '^v', '' } else { '' }
+if ($node -and [int](($verNode -split '\.')[0]) -ge 18) {
+    Bien "Node.js $verNode (para el panel de sesiones): $node"
+} elseif ($node) {
+    Ojo "Node.js $verNode es antiguo: el panel de sesiones necesita la 18 o superior (winget install OpenJS.NodeJS.LTS). Sin el, Claude se abre como siempre."
+} else {
+    Ojo 'No esta Node.js: el panel de sesiones no funcionara hasta que lo instales (winget install OpenJS.NodeJS.LTS). Sin el, Claude se abre como siempre.'
+}
+
 $sqlplus = (Get-Command sqlplus -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 if (-not $sqlplus) { $sqlplus = Get-ChildItem 'C:\Oracle\*\bin\sqlplus.exe', 'C:\app\*\product\*\*\bin\sqlplus.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
 if ($sqlplus) { Bien "Cliente de Oracle (sqlplus): $sqlplus" } else { Ojo 'No encuentro sqlplus: los botones de base de datos no funcionaran hasta que instales el cliente de Oracle.' }
@@ -184,9 +196,12 @@ foreach ($e in @($estado.errores)) { if ($e) { Mal $e } }
 foreach ($c in @($estado.conflictos)) { if ($c) { Ojo $c } }
 if ($dll -and (Test-Path $dll)) { Bien "Plug-in en $dll (version $($estado.version))" }
 foreach ($s in $elegidas) { if (Test-Path (Join-Path $skillsUsuario "$s\SKILL.md")) { Bien "Skill $s en $(Join-Path $skillsUsuario $s)" } }
+$actualPanel = Join-Path $dirPlugin 'panel-app\actual.txt'
+if (Test-Path $actualPanel) { Bien "Panel de sesiones en $(([System.IO.File]::ReadAllText($actualPanel)).Trim())$(if (-not $node) { ' (falta Node.js para usarlo)' })" }
 
 Titulo 'Listo'
 Write-Host '  Abre (o reinicia) PL/SQL Developer: tendras la pestaña Claude Code.'
+Write-Host '  Con Node.js instalado, el boton Panel de sesiones te enseña todas las sesiones de Claude abiertas, en directo.'
 if ($recibir -eq 'si') {
     Write-Host '  A partir de ahora, cada vez que arranque PL/SQL Developer se bajan solas las versiones nuevas del plug-in y de las'
     Write-Host '  skills elegidas; la DLL nueva se aplica al reiniciarlo.'

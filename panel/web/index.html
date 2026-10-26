@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sesiones de Claude</title>
+  <link rel="icon" href="/icono.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/vendor/xterm.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app" id="app" data-vista="terminal">
+    <aside class="lateral" aria-label="Sesiones">
+      <header class="lateral-cabecera">
+        <h1>Sesiones de Claude</h1>
+        <p class="resumen-estado" id="resumen-estado">Conectando…</p>
+      </header>
+      <nav>
+        <ul class="lista" id="lista"></ul>
+      </nav>
+      <div class="vacio" id="vacio" hidden>
+        <p>No hay ninguna sesión abierta.</p>
+        <p>Abre una desde PL/SQL Developer con <b>Abrir en Claude Code</b> y aparecerá aquí.</p>
+      </div>
+      <footer class="lateral-pie">
+        <button type="button" class="enlace" id="avisos">Avisarme cuando una sesión me necesite</button>
+      </footer>
+    </aside>
+
+    <main class="principal">
+      <header class="barra">
+        <div class="barra-titulo" id="barra-titulo">
+          <span class="numero" id="titulo-numero"></span>
+          <h2 id="titulo-texto">Ninguna sesión elegida</h2>
+          <span class="carpeta" id="titulo-carpeta"></span>
+        </div>
+        <div class="barra-acciones">
+          <div class="vistas" role="group" aria-label="Vista">
+            <button type="button" data-vista="terminal" aria-pressed="true">Terminal</button>
+            <button type="button" data-vista="mosaico" aria-pressed="false">Todas</button>
+          </div>
+          <button type="button" id="btn-esc" title="Manda la tecla Esc: interrumpe lo que esté haciendo Claude">Interrumpir</button>
+          <button type="button" id="btn-actividad" aria-pressed="true" title="Mostrar u ocultar la actividad">Actividad</button>
+          <button type="button" id="btn-cerrar" class="peligro" title="Cierra la terminal de esta sesión">Cerrar sesión</button>
+          <button type="button" id="btn-olvidar" hidden>Quitar de la lista</button>
+        </div>
+      </header>
+
+      <section class="vista-terminal" aria-label="Terminal de la sesión">
+        <div class="terminal-y-escritura">
+          <div class="aviso-sesion" id="aviso-sesion" hidden></div>
+          <div class="marco" id="marco">
+            <div class="terminal" id="terminal"></div>
+          </div>
+          <form class="escritura" id="escritura" autocomplete="off">
+            <label for="mensaje" class="oculto">Mensaje para Claude</label>
+            <textarea id="mensaje" rows="1" placeholder="Escribe a Claude en esta sesión (Intro envía, Mayús+Intro salta de línea)"></textarea>
+            <button type="submit">Enviar</button>
+          </form>
+        </div>
+        <aside class="actividad" id="actividad" aria-label="Actividad de la sesión">
+          <h3>Actividad</h3>
+          <ol class="eventos" id="eventos"></ol>
+          <p class="sin-mod" id="sin-mod" hidden>Esta sesión no informa de su actividad (se abrió sin el mod del panel). Puedes verla y usarla en la terminal.</p>
+        </aside>
+      </section>
+
+      <section class="vista-mosaico" aria-label="Todas las sesiones">
+        <div class="mosaico" id="mosaico"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="desconectado" id="desconectado" hidden>
+    <p>Se ha perdido la conexión con el panel. Reintentando…</p>
+  </div>
+
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-unicode11.js"></script>
+  <script src="/vendor/addon-web-links.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

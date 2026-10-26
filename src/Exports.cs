@@ -119,6 +119,7 @@ public static unsafe class Exports
                     Plugin.MenuExplainError => m + "E&xplicar error",
                     Plugin.MenuDocs => m + "Documentación del e&xpediente",
                     Plugin.MenuInstall => m + "Preparar &instalación",
+                    Plugin.MenuSessions => m + "Panel de &sesiones",
                     _ => "",
                 });
             }
@@ -144,6 +145,8 @@ public static unsafe class Exports
                 Plugin.MenuExplainError => "ITEM=Explicar error",
                 Plugin.MenuDocs => "ITEM=Documentación",
                 Plugin.MenuInstall => "ITEM=Preparar instalación",
+                20 => "GROUP=Sesiones",
+                Plugin.MenuSessions => "LARGEITEM=Panel de sesiones",
                 _ => "",
             });
         }

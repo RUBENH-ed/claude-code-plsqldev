@@ -1,0 +1,5 @@
+{
+  "name": "panel-sesiones",
+  "version": "1.0.0",
+  "description": "Avisa al panel de sesiones del plug-in de PL/SQL Developer de lo que hace Claude en esta sesión: turnos, herramientas y permisos."
+}
