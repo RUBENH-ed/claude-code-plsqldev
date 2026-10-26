@@ -15,7 +15,7 @@ const WebSocket = require('ws');
 
 const DATOS = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-prueba-'));
 const PUERTO = 20000 + Math.floor(Math.random() * 20000);
-const env = { ...process.env, PANEL_DATOS: DATOS, PANEL_PUERTO: String(PUERTO) };
+const env = { ...process.env, PANEL_DATOS: DATOS, PANEL_PUERTO: String(PUERTO), PANEL_PETICIONES: path.join(DATOS, 'peticiones') };
 const BASE = `http://127.0.0.1:${PUERTO}`;
 const raiz = path.join(__dirname, '..');
 
@@ -126,7 +126,70 @@ async function hasta(cond, ms, que) {
     await hasta(() => lista.find(s => s.id === sesion.id && s.estado === 'esperando'), 3000, 'estado "te espera"');
     console.log('ok  estado de la sesión con los avisos del mod');
 
-    // 7. Cerrar desde el panel
+    // 7. Sin ventana (el anfitrión no tiene terminal): toma el tamaño que manda el panel
+    assert.equal(sesion.sinVentana, true, 'sin terminal la sesión es "sin ventana"');
+    ws.send(JSON.stringify({ t: 'tam', id: sesion.id, cols: 101, rows: 33 }));
+    await hasta(() => lista.find(s => s.id === sesion.id && s.cols === 101 && s.rows === 33), 3000, 'tamaño del panel');
+    ws.send(JSON.stringify({ t: 'in', id: sesion.id, d: 'stty size\r' }));
+    await hasta(() => pantalla.includes('33 101'), 3000, 'la pseudoterminal tiene el tamaño nuevo');
+    console.log('ok  sesión sin ventana con el tamaño del panel');
+
+    // 8. Lo que usa el plug-in: buscar una sesión por título, dejarle texto escrito y enseñarla en el panel
+    const abrir = (...args) =>
+      new Promise(resolve => {
+        const h = spawn(process.execPath, [path.join(raiz, 'abrir.js'), ...args], { env });
+        let out = '';
+        h.stdout.on('data', c => (out += c));
+        h.on('exit', codigo => resolve({ codigo, out: out.trim() }));
+      });
+    let enfocada = null;
+    ws.on('message', m => {
+      const msg = JSON.parse(m);
+      if (msg.t === 'enfocar') enfocada = msg.id;
+    });
+    const fichero = path.join(DATOS, 'pegar.txt');
+    fs.writeFileSync(fichero, 'echo TEXTO_PEGADO');
+    assert.equal((await abrir('--titulo', 'Claude Code - 9999999 - No existe')).codigo, 3, 'sin sesión con ese título');
+    const r = await abrir('--titulo', 'Claude Code - 1234567 - Prueba', '--pegar', fichero);
+    assert.equal(r.codigo, 0);
+    assert.equal(r.out, sesion.id);
+    await hasta(() => pantalla.includes('echo TEXTO_PEGADO'), 3000, 'texto pegado en la sesión');
+    assert.ok(!pantalla.includes('\r\nTEXTO_PEGADO'), 'pegar no pulsa Intro');
+    await hasta(() => enfocada === sesion.id, 3000, 'el panel abierto enseña la sesión');
+    ws.send(JSON.stringify({ t: 'in', id: sesion.id, d: '\x15' })); // borra la línea pegada
+    console.log('ok  buscar por título, dejar texto escrito y enseñar la sesión');
+
+    // 9. Nueva sesión: el servidor deja la petición al plug-in y espera a que la recoja
+    const peticiones = path.join(DATOS, 'peticiones');
+    let respuesta = null;
+    ws.on('message', m => {
+      const msg = JSON.parse(m);
+      if (msg.t === 'nueva') respuesta = msg;
+    });
+    ws.send(JSON.stringify({ t: 'nueva', carpeta: '/no/es/un/expediente' }));
+    await hasta(() => respuesta, 3000, 'respuesta a una carpeta no válida');
+    assert.equal(respuesta.ok, false);
+    respuesta = null;
+    const expediente = fs.mkdtempSync(path.join(os.tmpdir(), 'exp-'));
+    const carpetaExp = path.join(expediente, '7654321 - Otro expediente');
+    fs.mkdirSync(carpetaExp);
+    ws.send(JSON.stringify({ t: 'nueva', carpeta: carpetaExp }));
+    const nombrePeticion = await hasta(() => fs.existsSync(peticiones) && fs.readdirSync(peticiones).find(f => f.endsWith('.json')), 3000, 'petición para el plug-in');
+    const datosPeticion = JSON.parse(fs.readFileSync(path.join(peticiones, nombrePeticion), 'utf8'));
+    assert.equal(datosPeticion.accion, 'claude');
+    assert.equal(datosPeticion.carpeta, carpetaExp);
+    fs.unlinkSync(path.join(peticiones, nombrePeticion)); // como hace el plug-in al recogerla
+    await hasta(() => respuesta, 3000, 'respuesta cuando el plug-in la recoge');
+    assert.equal(respuesta.ok, true);
+    console.log('ok  nueva sesión: petición al plug-in');
+
+    // 10. Preferencias guardadas en el equipo
+    ws.send(JSON.stringify({ t: 'prefs', prefs: { tema: 'claro', ventanas: 'ocultar' } }));
+    await hasta(() => fs.existsSync(path.join(DATOS, 'preferencias.json')), 3000, 'preferencias guardadas');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(DATOS, 'preferencias.json'), 'utf8')).ventanas, 'ocultar');
+    console.log('ok  preferencias guardadas (las lee el plug-in)');
+
+    // 11. Cerrar desde el panel
     ws.send(JSON.stringify({ t: 'cerrar', id: sesion.id }));
     await hasta(() => lista.find(s => s.id === sesion.id && !s.viva), 5000, 'sesión cerrada');
     await hasta(() => salioAnfitrion !== null, 5000, 'el anfitrión termina');
@@ -139,7 +202,12 @@ async function hasta(cond, ms, que) {
     } catch {
       // ya había terminado
     }
-    const srv = JSON.parse(fs.readFileSync(path.join(DATOS, 'servidor.json'), 'utf8').toString() || '{}');
+    let srv = {};
+    try {
+      srv = JSON.parse(fs.readFileSync(path.join(DATOS, 'servidor.json'), 'utf8'));
+    } catch {
+      // el servidor ya se había ido
+    }
     if (srv.pid) {
       try {
         process.kill(srv.pid);

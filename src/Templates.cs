@@ -1017,6 +1017,8 @@ export const register: Register = on => {
         // Tres pilotos (trabajando, te espera, pide permiso), como en el propio panel; botón grande
         (Plugin.MenuSessions, "Panel de sesiones",
             Svg("""<rect x="1.5" y="2.5" width="18" height="16" rx="2.5" fill="none" stroke="#434A54" stroke-width="1.3"/><rect x="5" y="6" width="2.6" height="9" rx="1.3" fill="#E9B44C"/><rect x="9.2" y="6" width="2.6" height="9" rx="1.3" fill="#27AE60"/><rect x="13.4" y="6" width="2.6" height="9" rx="1.3" fill="#EB5757"/>""", 37)),
+        (Plugin.MenuHelp, "Ayuda",
+            Svg("""<circle cx="10.5" cy="10.5" r="7.5" fill="none" stroke="#434A54" stroke-width="1.4"/><path d="M8.2 8.2a2.3 2.3 0 1 1 3.3 2.1c-.6.3-1 .8-1 1.4v.5" fill="none" stroke="#2F80ED" stroke-width="1.6" stroke-linecap="round"/><circle cx="10.5" cy="14.6" r="1" fill="#2F80ED"/>""")),
         (Plugin.MenuInstall, "Preparar instalación",
             Svg("""<path d="M3.5 7l7-3.5 7 3.5v8l-7 3.5-7-3.5z" fill="none" stroke="#434A54" stroke-linejoin="round"/><path d="M3.5 7l7 3.5 7-3.5M10.5 10.5v8" fill="none" stroke="#434A54" stroke-linejoin="round"/><path d="M14 2v4M12.5 4.5L14 6l1.5-1.5" fill="none" stroke="#27AE60" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>""")),
     };

@@ -1,9 +1,11 @@
 'use strict';
-// Panel de sesiones de Claude: lista, terminal en directo, actividad y vista de todas las sesiones.
+// Panel de sesiones de Claude: lista, terminal en directo, actividad, vista de todas las sesiones, sesiones nuevas
+// y preferencias (disposición, colores, ventanas de terminal).
 /* global Terminal, Unicode11Addon, WebLinksAddon */
 
 (() => {
   const $ = id => document.getElementById(id);
+  const html = document.documentElement;
   const app = $('app');
 
   const ESTADOS = {
@@ -16,24 +18,106 @@
     desconectada: 'Desconectada',
   };
 
-  const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace';
-  const TEMA = {
-    background: '#131924',
-    foreground: '#e6ebf2',
-    cursor: '#e6ebf2',
-    cursorAccent: '#131924',
-    selectionBackground: '#3a4a66',
-    black: '#1a2130', red: '#f2665c', green: '#4fc79a', yellow: '#e9b44c',
-    blue: '#7fa8e0', magenta: '#c49be8', cyan: '#5fc4d4', white: '#d5dbe5',
-    brightBlack: '#66728a', brightRed: '#ff8a80', brightGreen: '#7fe0b8', brightYellow: '#f5cd7a',
-    brightBlue: '#a6c4f0', brightMagenta: '#d9baf5', brightCyan: '#8edbe6', brightWhite: '#ffffff',
-  };
-
   /** @type {Map<string, any>} */
   let sesiones = new Map();
   let seleccion = null;
+  let pendienteDeEnfocar = null; // sesión que hay que enseñar en cuanto aparezca (la abre el plug-in o el panel)
+  let historial = [];
   let ws = null;
   let conectado = false;
+
+  // ------------------------------------------------------------------------------------------ preferencias
+
+  const COLORES = [
+    ['fondo', 'Fondo'],
+    ['panel', 'Paneles'],
+    ['texto', 'Texto'],
+    ['acento', 'Acento (foco y selección)'],
+    ['terminal', 'Fondo de la terminal'],
+    ['terminal-texto', 'Texto de la terminal'],
+    ['trabajando', 'Piloto: trabajando'],
+    ['permiso', 'Piloto: pide permiso'],
+    ['espera', 'Piloto: te espera'],
+  ];
+  const DEFECTO = {
+    tema: 'pizarra',
+    lista: 'izquierda',
+    actividad: 'derecha',
+    listaPlegada: false,
+    actividadPlegada: false,
+    caja: true,
+    letra: 14,
+    ventanas: 'mostrar',
+    colores: {},
+  };
+  let prefs = { ...DEFECTO };
+  try {
+    prefs = normalizar(JSON.parse(localStorage.getItem('panel-prefs') || '{}'));
+  } catch {
+    // sin preferencias en este navegador
+  }
+
+  function normalizar(p) {
+    const r = { ...DEFECTO, ...(p && typeof p === 'object' ? p : {}) };
+    const elige = (v, ...validos) => (validos.includes(v) ? v : validos[0]);
+    r.tema = elige(r.tema, 'pizarra', 'noche', 'claro', 'contraste');
+    r.lista = elige(r.lista, 'izquierda', 'arriba', 'derecha');
+    r.actividad = elige(r.actividad, 'derecha', 'abajo', 'izquierda');
+    r.ventanas = elige(r.ventanas, 'mostrar', 'ocultar');
+    r.listaPlegada = !!r.listaPlegada;
+    r.actividadPlegada = !!r.actividadPlegada;
+    r.caja = r.caja !== false;
+    r.letra = Math.min(20, Math.max(10, Number(r.letra) || 14));
+    const colores = {};
+    for (const [k] of COLORES) if (/^#[0-9a-f]{6}$/i.test(r.colores?.[k] || '')) colores[k] = r.colores[k].toLowerCase();
+    r.colores = colores;
+    return r;
+  }
+
+  function aplicarPrefs() {
+    html.dataset.tema = prefs.tema;
+    html.dataset.lista = prefs.lista;
+    html.dataset.actividad = prefs.actividad;
+    html.dataset.listaPlegada = prefs.listaPlegada ? 'si' : 'no';
+    html.dataset.actividadPlegada = prefs.actividadPlegada ? 'si' : 'no';
+    html.dataset.caja = prefs.caja ? 'si' : 'no';
+    for (const [k] of COLORES) {
+      if (prefs.colores[k]) html.style.setProperty(`--${k}`, prefs.colores[k]);
+      else html.style.removeProperty(`--${k}`);
+    }
+    const plegarLista = $('btn-plegar-lista');
+    plegarLista.setAttribute('aria-expanded', String(!prefs.listaPlegada));
+    const tLista = prefs.listaPlegada ? 'Desplegar la lista de sesiones' : 'Plegar la lista de sesiones';
+    plegarLista.title = tLista;
+    plegarLista.querySelector('.oculto').textContent = tLista;
+    const plegarAct = $('btn-plegar-actividad');
+    plegarAct.setAttribute('aria-expanded', String(!prefs.actividadPlegada));
+    const tAct = prefs.actividadPlegada ? 'Desplegar la actividad' : 'Plegar la actividad';
+    plegarAct.title = tAct;
+    plegarAct.querySelector('.oculto').textContent = tAct;
+    $('btn-ampliar').setAttribute('aria-pressed', String(prefs.listaPlegada && prefs.actividadPlegada));
+    if (sesiones.size) pintarLista(); // plegada o no, cambia cómo se nombra cada sesión
+    aplicarTemaTerminales();
+    // La barra de título de la ventana de Edge toma el color del fondo
+    document.querySelector('meta[name="theme-color"]').content = aHex(css('--fondo'));
+    requestAnimationFrame(() => {
+      principal.ajustar();
+      for (const t of teselas.values()) t.vista.ajustar();
+    });
+  }
+
+  let guardado = null;
+  function cambiarPrefs(cambios) {
+    prefs = normalizar({ ...prefs, ...cambios });
+    aplicarPrefs();
+    try {
+      localStorage.setItem('panel-prefs', JSON.stringify(prefs));
+    } catch {
+      // el navegador no deja guardar: se guardan igualmente en el equipo
+    }
+    clearTimeout(guardado);
+    guardado = setTimeout(() => enviar({ t: 'prefs', prefs }), 300);
+  }
 
   // ------------------------------------------------------------------------------------------ utilidades
 
@@ -49,14 +133,11 @@
     if (s < 60) return 'hace un momento';
     const m = Math.round(s / 60);
     if (m < 60) return `hace ${m} min`;
-    const h = Math.round(m / 60);
-    return `hace ${h} h`;
+    return `hace ${Math.round(m / 60)} h`;
   }
 
-  function hora(ms) {
-    const d = new Date(ms);
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  }
+  const FORMATO_HORA = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' });
+  const hora = ms => FORMATO_HORA.format(new Date(ms));
 
   function detalle(s) {
     if (s.estado === 'cerrada') return `Terminal cerrada ${hace(s.fin)}`;
@@ -74,29 +155,66 @@
       else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
       else e.setAttribute(k, v === true ? '' : v);
     }
-    for (const h of hijos) if (h !== null && h !== undefined) e.append(h);
+    for (const h of hijos) if (h !== null && h !== undefined && h !== '') e.append(h);
     return e;
   }
 
   function nombreNodo(s) {
     const { numero, texto } = partirTitulo(s.titulo);
-    return el('span', { class: 'nombre', title: s.titulo }, numero ? el('span', { class: 'numero' }, numero) : null, texto);
+    return el('span', { class: 'nombre' }, numero ? el('span', { class: 'numero' }, numero) : null, texto);
   }
+
+  /** Nombre corto para la lista plegada: el número de expediente o el principio del título. */
+  function corto(s) {
+    const { numero, texto } = partirTitulo(s.titulo);
+    return numero ? numero.slice(-4) : texto.slice(0, 4);
+  }
+
+  const anunciar = (() => {
+    let t = null;
+    return texto => {
+      clearTimeout(t);
+      t = setTimeout(() => ($('anuncios').textContent = texto), 50);
+    };
+  })();
 
   // ------------------------------------------------------------------------------------------ terminales
 
-  /** Vistas de terminal abiertas por sesión: la principal y las del mosaico. */
-  const vistas = new Map(); // id -> Set<{ term, ajustar }>
+  const vistas = new Map(); // id -> Set<vista>
 
-  function medirCelda() {
+  function css(nombre) {
+    return getComputedStyle(html).getPropertyValue(nombre).trim();
+  }
+
+  /** Colores de la terminal a partir de los del tema (y los que haya cambiado la persona). */
+  function temaTerminal() {
+    const claro = prefs.tema === 'claro';
+    const ansi = claro
+      ? { black: '#1b2330', red: '#c6372c', green: '#1d7f57', yellow: '#8a5d00', blue: '#2f6db5', magenta: '#8a46b8', cyan: '#147c8c', white: '#d0d6df',
+          brightBlack: '#5f6b7e', brightRed: '#e0473b', brightGreen: '#23966a', brightYellow: '#a8700c', brightBlue: '#3c80cf', brightMagenta: '#a05cd0', brightCyan: '#1b93a5', brightWhite: '#ffffff' }
+      : { black: '#1a2130', red: '#f2665c', green: '#4fc79a', yellow: '#e9b44c', blue: '#7fa8e0', magenta: '#c49be8', cyan: '#5fc4d4', white: '#d5dbe5',
+          brightBlack: '#66728a', brightRed: '#ff8a80', brightGreen: '#7fe0b8', brightYellow: '#f5cd7a', brightBlue: '#a6c4f0', brightMagenta: '#d9baf5', brightCyan: '#8edbe6', brightWhite: '#ffffff' };
+    const fondo = css('--terminal') || '#131924';
+    const texto = css('--terminal-texto') || '#e6ebf2';
+    return { ...ansi, background: fondo, foreground: texto, cursor: texto, cursorAccent: fondo, selectionBackground: `${(css('--acento') || '#7fa8e0').slice(0, 7)}55` };
+  }
+
+  function aplicarTemaTerminales() {
+    const tema = temaTerminal();
+    principal.term.options.theme = tema;
+    for (const t of teselas.values()) t.vista.term.options.theme = tema;
+  }
+
+  const MONO = css('--mono') || 'monospace';
+
+  /** Medida de una celda (ancho y alto por cada punto de letra) con la letra de la terminal. */
+  const CELDA = (() => {
     const c = document.createElement('canvas').getContext('2d');
     c.font = `100px ${MONO}`;
-    const m = c.measureText('W');
-    return { ancho: m.width / 100, alto: 1.2 };
-  }
-  const CELDA = medirCelda();
+    return { ancho: c.measureText('W').width / 100, alto: 1.2 };
+  })();
 
-  /** Tamaño de letra para que cols x rows quepan en el hueco (la sesión manda el tamaño, no el panel). */
+  /** Letra para que cols x rows quepan en el hueco (sesión con ventana: manda el tamaño de su ventana). */
   function letraPara(cols, rows, ancho, alto, max) {
     const porAncho = ancho / (cols * CELDA.ancho);
     const porAlto = alto / (rows * CELDA.alto);
@@ -108,14 +226,14 @@
       cols: 120,
       rows: 30,
       fontFamily: MONO,
-      fontSize: 14,
-      theme: TEMA,
+      fontSize: prefs.letra,
+      theme: temaTerminal(),
       scrollback: 3000,
       allowProposedApi: true,
       disableStdin: !interactiva,
       cursorBlink: interactiva,
       cursorInactiveStyle: 'outline',
-      macOptionIsMeta: true,
+      screenReaderMode: false,
     });
     term.loadAddon(new Unicode11Addon.Unicode11Addon());
     term.unicode.activeVersion = '11';
@@ -142,11 +260,9 @@
     }
   }
 
-  function vistasDe(id) {
-    return vistas.get(id) || new Set();
-  }
+  const vistasDe = id => vistas.get(id) || new Set();
 
-  // Terminal principal (una sola, que cambia de sesión)
+  // Terminal principal: una sola, que cambia de sesión
   const principal = {
     id: null,
     term: crearTerminal($('terminal'), true),
@@ -154,14 +270,41 @@
     rows: 30,
     ajustar() {
       const marco = $('marco');
-      const fs = letraPara(this.cols, this.rows, marco.clientWidth - 18, marco.clientHeight - 18, 16);
+      const ancho = marco.clientWidth - 18;
+      const alto = marco.clientHeight - 18;
+      if (ancho <= 0 || alto <= 0) return;
+      const s = sesiones.get(this.id);
+      if (s && s.sinVentana && s.viva) {
+        // Sin ventana: la terminal toma el tamaño del panel, con la letra elegida
+        if (this.term.options.fontSize !== prefs.letra) this.term.options.fontSize = prefs.letra;
+        const cols = Math.max(20, Math.floor((ancho - 4) / (CELDA.ancho * prefs.letra)));
+        const rows = Math.max(5, Math.floor(alto / (CELDA.alto * prefs.letra)));
+        if (cols !== s.cols || rows !== s.rows) pedirTamaño(this.id, cols, rows);
+        return;
+      }
+      const fs = letraPara(this.cols, this.rows, ancho, alto, prefs.letra);
       if (this.term.options.fontSize !== fs) this.term.options.fontSize = fs;
     },
   };
   principal.term.onData(d => {
     if (principal.id) enviar({ t: 'in', id: principal.id, d });
   });
+  // Tab y Mayús+Tab son de la sesión (Claude los usa): para salir de la terminal con el teclado, F6 va a la lista de
+  // sesiones y Mayús+F6 a los botones de la barra
+  principal.term.attachCustomKeyEventHandler(e => {
+    if (e.type !== 'keydown' || e.key !== 'F6' || e.ctrlKey || e.altKey || e.metaKey) return true;
+    e.preventDefault();
+    if (e.shiftKey) document.querySelector('.barra-acciones button:not([disabled]):not([hidden])')?.focus();
+    else (document.querySelector('.sesion[aria-current="true"]') || document.querySelector('.sesion') || $('btn-nueva')).focus();
+    return false;
+  });
   new ResizeObserver(() => principal.ajustar()).observe($('marco'));
+
+  let tamañoPendiente = null;
+  function pedirTamaño(id, cols, rows) {
+    clearTimeout(tamañoPendiente);
+    tamañoPendiente = setTimeout(() => enviar({ t: 'tam', id, cols, rows }), 120);
+  }
 
   function mirar(id) {
     if (principal.id === id) return;
@@ -199,6 +342,28 @@
       case 'lista':
         actualizarLista(msg.sesiones);
         break;
+      case 'prefs':
+        // Las guardadas en el equipo mandan sobre las de este navegador (si hay alguna)
+        if (msg.prefs && Object.keys(msg.prefs).length > 0) {
+          prefs = normalizar(msg.prefs);
+          try {
+            localStorage.setItem('panel-prefs', JSON.stringify(prefs));
+          } catch {
+            // nada
+          }
+          aplicarPrefs();
+          if ($('dlg-ajustes').open) pintarAjustes();
+        }
+        break;
+      case 'historial':
+        historial = Array.isArray(msg.lista) ? msg.lista : [];
+        break;
+      case 'enfocar':
+        enfocar(msg.id);
+        break;
+      case 'nueva':
+        resultadoNueva(msg);
+        break;
       case 'snap':
         for (const v of vistasDe(msg.id)) {
           // Una foto final vacía (la terminal se cerró de golpe) no borra lo que ya se veía
@@ -214,7 +379,12 @@
       case 'out':
         for (const v of vistasDe(msg.id)) v.term.write(msg.d);
         break;
-      case 'size':
+      case 'size': {
+        const s = sesiones.get(msg.id);
+        if (s) {
+          s.cols = msg.cols;
+          s.rows = msg.rows;
+        }
         for (const v of vistasDe(msg.id)) {
           v.cols = msg.cols;
           v.rows = msg.rows;
@@ -222,6 +392,7 @@
           v.ajustar();
         }
         break;
+      }
       case 'eventos':
         if (msg.id === principal.id) pintarEventos(msg.lista, true);
         break;
@@ -238,6 +409,12 @@
     sesiones = new Map(lista.map(s => [s.id, s]));
     avisar(antes, sesiones);
 
+    if (pendienteDeEnfocar && sesiones.has(pendienteDeEnfocar.id)) {
+      const id = pendienteDeEnfocar.id;
+      pendienteDeEnfocar = null;
+      elegir(id, false);
+      return;
+    }
     if (seleccion && !sesiones.has(seleccion)) seleccion = null;
     if (!seleccion && lista.length > 0) {
       // Por defecto, la que más te necesita: la que pide permiso, luego la que te espera, luego la más reciente viva
@@ -249,43 +426,53 @@
     pintarCabecera();
     if (app.dataset.vista === 'mosaico') pintarMosaico();
     if (app.dataset.vista === 'terminal') mirar(seleccion);
+    principal.ajustar();
   }
 
   function pintarLista() {
     const ul = $('lista');
     const lista = [...sesiones.values()];
     $('vacio').hidden = lista.length > 0;
+    const enfocado = document.activeElement && document.activeElement.closest && document.activeElement.closest('.sesion');
+    const idEnfocado = enfocado ? enfocado.dataset.id : null;
     ul.replaceChildren(
-      ...lista.map(s =>
-        el(
+      ...lista.map(s => {
+        const estado = ESTADOS[s.estado] || s.estado;
+        return el(
           'li',
           {},
           el(
             'a',
             {
               class: 'sesion',
-              href: '#',
+              href: `#${s.id}`,
+              'data-id': s.id,
               'data-estado': s.estado,
               'aria-current': s.id === seleccion ? 'true' : 'false',
+              title: `${s.titulo}: ${estado}${detalle(s) ? `. ${detalle(s)}` : ''}`,
+              // Plegada, el estado no puede ir solo en el color: el nombre accesible lo dice entero
+              'aria-label': prefs.listaPlegada ? `${s.titulo}: ${estado}` : null,
               onclick: e => {
                 e.preventDefault();
-                elegir(s.id);
+                elegir(s.id, true);
               },
             },
             nombreNodo(s),
-            el('span', { class: 'estado' }, ESTADOS[s.estado] || s.estado),
-            el('span', { class: 'detalle', title: detalle(s) }, detalle(s))
+            el('span', { class: 'estado' }, estado),
+            el('span', { class: 'detalle' }, detalle(s)),
+            el('span', { class: 'corto', 'aria-hidden': 'true' }, corto(s), s.estado === 'permiso' ? el('b', { class: 'marca' }, '!') : null)
           )
-        )
-      )
+        );
+      })
     );
+    if (idEnfocado) ul.querySelector(`.sesion[data-id="${CSS.escape(idEnfocado)}"]`)?.focus();
 
     const n = c => lista.filter(s => s.estado === c).length;
     const abiertas = lista.filter(s => s.viva).length;
     const partes = [`${abiertas} ${abiertas === 1 ? 'abierta' : 'abiertas'}`];
     if (n('permiso')) partes.push(`${n('permiso')} ${n('permiso') === 1 ? 'pide' : 'piden'} permiso`);
     if (n('esperando')) partes.push(`${n('esperando')} te ${n('esperando') === 1 ? 'espera' : 'esperan'}`);
-    if (n('trabajando')) partes.push(`${n('trabajando')} ${n('trabajando') === 1 ? 'trabajando' : 'trabajando'}`);
+    if (n('trabajando')) partes.push(`${n('trabajando')} trabajando`);
     $('resumen-estado').textContent = partes.join(', ');
     const pendientes = n('permiso') + n('esperando');
     document.title = pendientes ? `(${pendientes}) Sesiones de Claude` : 'Sesiones de Claude';
@@ -296,7 +483,7 @@
     const titulo = $('barra-titulo');
     if (!s) {
       $('titulo-numero').textContent = '';
-      $('titulo-texto').textContent = 'Ninguna sesión elegida';
+      $('titulo-texto').textContent = sesiones.size ? 'Elige una sesión' : 'Ninguna sesión abierta';
       $('titulo-carpeta').textContent = '';
       titulo.removeAttribute('data-estado');
     } else {
@@ -321,24 +508,38 @@
     if (s && s.estado === 'permiso') {
       aviso.hidden = false;
       aviso.dataset.estado = 'permiso';
-      aviso.textContent = `${s.actividad}. Contesta en la terminal (por ejemplo, con las flechas e Intro).`;
+      aviso.textContent = `${s.actividad}. Contesta en la terminal (con las flechas e Intro).`;
     } else if (s && !s.viva) {
       aviso.hidden = false;
       aviso.dataset.estado = s.estado;
       aviso.textContent =
         s.estado === 'cerrada'
-          ? 'Esta sesión ya no está abierta: ves cómo quedó su terminal. Para seguir, vuelve a abrirla desde PL/SQL Developer.'
+          ? 'Esta sesión ya no está abierta: ves cómo quedó su terminal. Para seguir, vuelve a abrirla desde PL/SQL Developer o con Nueva sesión.'
           : 'Se ha perdido la conexión con la terminal de esta sesión (la ventana se cerró o el programa terminó de golpe).';
     } else aviso.hidden = true;
   }
 
-  function elegir(id) {
+  function elegir(id, foco) {
     seleccion = id;
+    // La sesión elegida queda en la dirección (#id): al recargar, el panel vuelve a ella
+    if (location.hash !== `#${id}`) history.replaceState(null, '', `#${id}`);
     if (app.dataset.vista !== 'terminal') cambiarVista('terminal');
     pintarLista();
     pintarCabecera();
     mirar(id);
-    principal.term.focus();
+    principal.ajustar();
+    if (foco) principal.term.focus();
+  }
+
+  /** El plug-in pide enseñar una sesión (recién abierta o reutilizada): se elige en cuanto aparece en la lista. */
+  function enfocar(id) {
+    if (sesiones.has(id)) elegir(id, true);
+    else pendienteDeEnfocar = { id, hasta: Date.now() + 20000 };
+    try {
+      window.focus();
+    } catch {
+      // el navegador decide si deja traer la ventana al frente
+    }
   }
 
   // ------------------------------------------------------------------------------------------ actividad
@@ -350,11 +551,14 @@
       const que = el('div', { class: 'que' });
       if (ev.herramienta) {
         const etiqueta = ev.tipo === 'permiso' ? `Permiso para ${ev.herramienta}` : ev.tipo === 'denegada' ? `${ev.herramienta} denegada` : ev.herramienta;
-        que.append(el('span', { class: 'herr' }, etiqueta), ev.texto ? el('div', { class: 'texto' }, ev.texto) : '');
+        que.append(el('span', { class: 'herr' }, etiqueta));
+        if (ev.texto) que.append(el('div', { class: 'texto' }, ev.texto));
+      } else if (ev.tipo === 'mensaje' || ev.tipo === 'respuesta') {
+        que.append(el('span', { class: 'quien' }, ev.tipo === 'mensaje' ? 'Tú:' : 'Claude:'), ev.texto || '');
       } else {
         que.append(ev.texto || '');
       }
-      ol.prepend(el('li', { 'data-tipo': ev.tipo }, el('span', { class: 'hora' }, hora(ev.hora)), que));
+      ol.prepend(el('li', { 'data-tipo': ev.tipo }, el('time', { class: 'hora', datetime: new Date(ev.hora).toISOString() }, hora(ev.hora)), que));
     }
     while (ol.children.length > 200) ol.lastChild.remove();
   }
@@ -377,16 +581,11 @@
     for (const s of sesiones.values()) {
       let t = teselas.get(s.id);
       if (!t) {
+        // La miniatura es solo para mirar: inert la deja fuera del teclado y de los lectores de pantalla
         const mini = el('div', { class: 'mini' });
-        const nodo = el('article', {
-          class: 'tesela',
-          tabindex: '0',
-          onclick: () => elegir(s.id),
-          onkeydown: e => {
-            if (e.key === 'Enter') elegir(s.id);
-          },
-        });
-        nodo.append(el('header'), el('div', { class: 'detalle' }), mini);
+        mini.inert = true;
+        const nodo = el('article', { class: 'tesela' });
+        nodo.append(el('button', { type: 'button', class: 'tesela-abrir', onclick: () => elegir(s.id, true) }), el('div', { class: 'detalle' }), mini);
         cont.append(nodo);
         const vista = {
           term: crearTerminal(mini, false),
@@ -402,11 +601,9 @@
         añadirVista(s.id, vista);
       }
       t.nodo.dataset.estado = s.estado;
-      t.nodo.querySelector('header').replaceChildren(nombreNodo(s), el('span', { class: 'estado' }, ESTADOS[s.estado] || s.estado));
+      t.nodo.querySelector('.tesela-abrir').replaceChildren(nombreNodo(s), el('span', { class: 'estado' }, ESTADOS[s.estado] || s.estado));
       t.nodo.querySelector('.detalle').textContent = detalle(s);
-      t.nodo.setAttribute('aria-label', `${s.titulo}: ${ESTADOS[s.estado] || s.estado}`);
     }
-    $('mosaico').classList.toggle('vacio-mosaico', sesiones.size === 0);
   }
 
   function cerrarMosaico() {
@@ -432,30 +629,31 @@
 
   for (const b of document.querySelectorAll('.vistas button')) b.addEventListener('click', () => cambiarVista(b.dataset.vista));
 
-  // ------------------------------------------------------------------------------------------ acciones
+  // ------------------------------------------------------------------------------------------ acciones de la barra
 
   $('btn-esc').addEventListener('click', () => {
     if (seleccion) enviar({ t: 'in', id: seleccion, d: '\x1b' });
     principal.term.focus();
   });
 
-  $('btn-actividad').addEventListener('click', () => {
-    const mostrar = app.dataset.actividad === 'no';
-    app.dataset.actividad = mostrar ? 'si' : 'no';
-    $('btn-actividad').setAttribute('aria-pressed', String(mostrar));
-    requestAnimationFrame(() => principal.ajustar());
-  });
-
   $('btn-cerrar').addEventListener('click', () => {
     const s = sesiones.get(seleccion);
     if (!s) return;
-    if (confirm(`¿Cerrar la sesión «${s.titulo}»?\n\nSe cierra su terminal, también la ventana de Windows Terminal. La conversación queda guardada y se retoma al volver a abrirla desde PL/SQL Developer.`)) {
+    const ventana = s.sinVentana ? '' : ' También se cierra su ventana de Windows Terminal.';
+    if (confirm(`¿Cerrar la sesión «${s.titulo}»?\n\nSe cierra su terminal.${ventana} La conversación queda guardada y se retoma al volver a abrirla.`)) {
       enviar({ t: 'cerrar', id: s.id });
     }
   });
 
   $('btn-olvidar').addEventListener('click', () => {
     if (seleccion) enviar({ t: 'olvidar', id: seleccion });
+  });
+
+  $('btn-plegar-lista').addEventListener('click', () => cambiarPrefs({ listaPlegada: !prefs.listaPlegada }));
+  $('btn-plegar-actividad').addEventListener('click', () => cambiarPrefs({ actividadPlegada: !prefs.actividadPlegada }));
+  $('btn-ampliar').addEventListener('click', () => {
+    const ampliada = prefs.listaPlegada && prefs.actividadPlegada;
+    cambiarPrefs({ listaPlegada: !ampliada, actividadPlegada: !ampliada });
   });
 
   // Escribir desde la caja de abajo: se pega en la sesión y se pulsa Intro
@@ -477,10 +675,165 @@
     if (!texto.trim() || !principal.id) return;
     // paste() le pone las marcas de pegado si la sesión las usa, para que los saltos de línea no envíen antes de tiempo
     principal.term.paste(texto);
-    setTimeout(() => enviar({ t: 'in', id: principal.id, d: '\r' }), 80);
+    const id = principal.id;
+    setTimeout(() => enviar({ t: 'in', id, d: '\r' }), 80);
     mensaje.value = '';
     crecer();
   });
+
+  // ------------------------------------------------------------------------------------------ nueva sesión
+
+  const dlgNueva = $('dlg-nueva');
+
+  function nombreCarpeta(c) {
+    return c.split(/[\\/]/).filter(Boolean).pop() || c;
+  }
+
+  function abrirNueva() {
+    const cont = $('opciones-carpeta');
+    const vistasCarpetas = new Set();
+    const opciones = [];
+    // Primero el expediente de la sesión elegida, luego los recientes
+    const elegida = sesiones.get(seleccion);
+    for (const c of [elegida?.carpeta, ...historial.map(h => h.carpeta)]) {
+      if (!c || vistasCarpetas.has(c.toLowerCase()) || !/^\d{7} - ./.test(nombreCarpeta(c))) continue;
+      vistasCarpetas.add(c.toLowerCase());
+      opciones.push(c);
+    }
+    cont.replaceChildren(
+      ...opciones.slice(0, 12).map((c, i) =>
+        el(
+          'label',
+          { class: 'opcion' },
+          el('input', { type: 'radio', name: 'carpeta', value: c, checked: i === 0 }),
+          el('span', {}, nombreCarpeta(c), el('small', {}, c))
+        )
+      ),
+      el(
+        'label',
+        { class: 'opcion' },
+        el('input', { type: 'radio', name: 'carpeta', value: '', checked: opciones.length === 0 }),
+        el('span', {}, 'Carpeta general', el('small', {}, 'Fuera de cualquier expediente (CarpetaTrabajo del plug-in)'))
+      )
+    );
+    $('carpeta-otra').value = '';
+    $('nueva-error').hidden = true;
+    $('nueva-abrir').disabled = false;
+    $('nueva-abrir').textContent = 'Abrir sesión';
+    dlgNueva.showModal();
+  }
+
+  $('btn-nueva').addEventListener('click', abrirNueva);
+  $('nueva-cancelar').addEventListener('click', () => dlgNueva.close());
+  $('carpeta-otra').addEventListener('input', () => {
+    const otra = dlgNueva.querySelector('input[name="carpeta"][value="__otra__"]');
+    if (otra) otra.checked = true;
+  });
+
+  $('form-nueva').addEventListener('submit', e => {
+    e.preventDefault();
+    const elegido = dlgNueva.querySelector('input[name="carpeta"]:checked');
+    let carpeta = elegido ? elegido.value : '';
+    if (carpeta === '__otra__') carpeta = $('carpeta-otra').value.trim().replace(/^"|"$/g, '');
+    if (elegido && elegido.value === '__otra__' && !carpeta) {
+      mostrarErrorNueva('Escribe la ruta de la carpeta del expediente.');
+      $('carpeta-otra').focus();
+      return;
+    }
+    $('nueva-error').hidden = true;
+    $('nueva-abrir').disabled = true;
+    $('nueva-abrir').textContent = 'Abriendo…';
+    enviar({ t: 'nueva', carpeta });
+  });
+
+  function mostrarErrorNueva(texto) {
+    const p = $('nueva-error');
+    p.textContent = texto;
+    p.hidden = false;
+  }
+
+  function resultadoNueva(r) {
+    if (!dlgNueva.open) return;
+    $('nueva-abrir').disabled = false;
+    $('nueva-abrir').textContent = 'Abrir sesión';
+    if (r.ok) {
+      dlgNueva.close();
+      $('resumen-estado').textContent = 'Abriendo la sesión…';
+    } else {
+      mostrarErrorNueva(r.error || 'No se ha podido abrir la sesión.');
+    }
+  }
+
+  // ------------------------------------------------------------------------------------------ personalizar
+
+  const dlgAjustes = $('dlg-ajustes');
+  const formAjustes = $('form-ajustes');
+
+  function pintarAjustes() {
+    for (const nombre of ['lista', 'actividad', 'ventanas', 'tema']) {
+      const r = formAjustes.querySelector(`input[name="${nombre}"][value="${prefs[nombre]}"]`);
+      if (r) r.checked = true;
+    }
+    formAjustes.elements.letra.value = prefs.letra;
+    $('letra-valor').textContent = `${prefs.letra} px`;
+    formAjustes.elements.caja.checked = prefs.caja;
+    const cont = $('colores');
+    cont.replaceChildren(
+      ...COLORES.map(([k, etiqueta]) => {
+        const valor = prefs.colores[k] || aHex(css(`--${k}`));
+        return el(
+          'label',
+          { class: 'color' },
+          el('input', { type: 'color', 'data-color': k, value: valor }),
+          el('span', {}, etiqueta)
+        );
+      })
+    );
+  }
+
+  /** Color calculado del tema en #rrggbb (para el selector de color). */
+  function aHex(valor) {
+    if (/^#[0-9a-f]{6}$/i.test(valor)) return valor.toLowerCase();
+    const c = document.createElement('canvas').getContext('2d');
+    c.fillStyle = '#000';
+    c.fillStyle = valor;
+    const v = c.fillStyle;
+    return /^#[0-9a-f]{6}$/i.test(v) ? v : '#000000';
+  }
+
+  $('btn-ajustes').addEventListener('click', () => {
+    pintarAjustes();
+    dlgAjustes.showModal();
+  });
+
+  formAjustes.addEventListener('change', e => {
+    const t = e.target;
+    if (t.name === 'tema') cambiarPrefs({ tema: t.value, colores: {} });
+    else if (['lista', 'actividad', 'ventanas'].includes(t.name)) cambiarPrefs({ [t.name]: t.value });
+    else if (t.name === 'caja') cambiarPrefs({ caja: t.checked });
+    if (t.name === 'tema') pintarAjustes();
+  });
+  formAjustes.addEventListener('input', e => {
+    const t = e.target;
+    if (t.name === 'letra') {
+      $('letra-valor').textContent = `${t.value} px`;
+      cambiarPrefs({ letra: Number(t.value) });
+    } else if (t.dataset.color) {
+      cambiarPrefs({ colores: { ...prefs.colores, [t.dataset.color]: t.value } });
+    }
+  });
+  $('colores-restablecer').addEventListener('click', () => {
+    cambiarPrefs({ colores: {} });
+    pintarAjustes();
+  });
+  $('ajustes-restablecer').addEventListener('click', () => {
+    cambiarPrefs({ ...DEFECTO, colores: {} });
+    pintarAjustes();
+  });
+
+  // ------------------------------------------------------------------------------------------ ayuda
+
+  $('btn-ayuda').addEventListener('click', () => $('dlg-ayuda').showModal());
 
   // ------------------------------------------------------------------------------------------ avisos
 
@@ -509,22 +862,33 @@
       if (s.estado === 'permiso') texto = s.actividad || 'Pide permiso';
       else if (s.estado === 'esperando' && previa.estado === 'trabajando') texto = 'Ha terminado y te espera';
       if (!texto) continue;
+      const { numero, texto: nombre } = partirTitulo(s.titulo);
+      anunciar(`${numero || nombre}: ${texto}`);
       const mirandola = !document.hidden && app.dataset.vista === 'terminal' && seleccion === s.id;
       if (mirandola || !('Notification' in window) || Notification.permission !== 'granted') continue;
-      const { numero, texto: nombre } = partirTitulo(s.titulo);
       const n = new Notification(numero ? `${numero} ${nombre}` : nombre, { body: texto, tag: s.id, icon: '/icono.svg' });
       n.onclick = () => {
         window.focus();
-        elegir(s.id);
+        elegir(s.id, true);
         n.close();
       };
     }
   }
 
-  // El texto "hace x min" se actualiza solo
+  // El texto "hace x min" se actualiza solo; una sesión pendiente que no llega se deja de esperar
   setInterval(() => {
+    if (pendienteDeEnfocar && Date.now() > pendienteDeEnfocar.hasta) pendienteDeEnfocar = null;
     if (sesiones.size) pintarLista();
   }, 30 * 1000);
 
+  // Enlace de entrada con ?sesion=<id>: el plug-in abrió el panel para enseñar esa sesión
+  // (o con #<id>: la sesión que se estaba mirando antes de recargar)
+  const pedida = new URLSearchParams(location.search).get('sesion') || location.hash.slice(1);
+  if (pedida && /^[A-Za-z0-9_-]{8,64}$/.test(pedida)) {
+    pendienteDeEnfocar = { id: pedida, hasta: Date.now() + 20000 };
+    history.replaceState(null, '', `/#${pedida}`);
+  }
+
+  aplicarPrefs();
   conectar();
 })();

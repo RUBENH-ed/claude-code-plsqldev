@@ -147,6 +147,11 @@ internal static class Prompts
         "disparadores, datos). Enséñame antes la lista y el orden. Después escribe el script como un .sql nuevo en " +
         "Windows-1252, con CRLF y sin BOM, sin tocar los fuentes originales.";
 
+    /// <summary>Sesión abierta con el botón «Nueva sesión» del panel, sin ninguna ventana del IDE.</summary>
+    public static string FromPanel(Workspace ws) =>
+        Marker + (ws.IsProject ? $" en el expediente {ws.Label}." : ", fuera de cualquier expediente.") +
+        " Me la he abierto desde el panel de sesiones, sin ninguna ventana concreta." + End(ws) + " Espera mis instrucciones.";
+
     /// <summary>Encargo sobre el expediente entero, sin una ventana concreta.</summary>
     public static string ProjectTask(Workspace ws, string task) =>
         $"{Marker} en el expediente {ws.Label}.{End(ws)} {task}";

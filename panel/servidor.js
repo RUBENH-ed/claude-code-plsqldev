@@ -29,6 +29,9 @@ const MODULOS = path.join(__dirname, 'node_modules');
 const INACTIVIDAD_MS = parseInt(process.env.PANEL_INACTIVIDAD_MS || '', 10) || 20 * 60 * 1000;
 const MAX_EVENTOS = 200;
 const MAX_COLA = 4000;
+// Peticiones al plug-in de PL/SQL Developer (abrir una sesión nueva): la carpeta que vigila su temporizador
+const PETICIONES = process.env.PANEL_PETICIONES || path.join(path.dirname(DATOS), 'peticiones');
+const ID_VALIDO = /^[A-Za-z0-9_-]{8,64}$/;
 
 // ------------------------------------------------------------------------------------------------ registro
 
@@ -62,6 +65,8 @@ function nuevaSesion(hola) {
     inicio: Number(hola.inicio) || Date.now(),
     cols: hola.cols | 0 || 120,
     rows: hola.rows | 0 || 30,
+    // Sin ventana de Windows Terminal: solo se ve en el panel, que manda su tamaño
+    sinVentana: !!hola.sinVentana,
     host: null,
     viva: true,
     finCodigo: null,
@@ -101,8 +106,73 @@ function resumen(s) {
     fin: s.fin,
     conMod: s.mod.activo,
     modelo: s.mod.modelo,
+    sinVentana: s.sinVentana,
   };
 }
+
+// ------------------------------------------------------------------------------------------------ preferencias e historial
+
+// Preferencias del panel (disposición, colores, ventanas de terminal): se guardan aquí para que valgan en cualquier
+// navegador y para que el plug-in sepa si tiene que abrir las sesiones sin ventana.
+const FICHERO_PREFS = path.join(DATOS, 'preferencias.json');
+let preferencias = C.leerJson(FICHERO_PREFS) || {};
+
+function guardarPreferencias(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
+  const texto = JSON.stringify(p);
+  if (texto.length > 32 * 1024) return false;
+  preferencias = p;
+  C.escribirSeguro(FICHERO_PREFS, texto);
+  return true;
+}
+
+// Carpetas en las que se han abierto sesiones, para ofrecerlas al abrir una nueva desde el panel
+const FICHERO_HISTORIAL = path.join(DATOS, 'historial.json');
+let historial = Array.isArray(C.leerJson(FICHERO_HISTORIAL)) ? C.leerJson(FICHERO_HISTORIAL) : [];
+
+function apuntarHistorial(s) {
+  if (!s.carpeta) return;
+  historial = [{ carpeta: s.carpeta, titulo: s.titulo, hora: Date.now() }, ...historial.filter(h => h.carpeta.toLowerCase() !== s.carpeta.toLowerCase())].slice(0, 30);
+  try {
+    C.escribirSeguro(FICHERO_HISTORIAL, JSON.stringify(historial));
+  } catch {
+    // sin historial no pasa nada
+  }
+  for (const n of navegadores) enviar(n, { t: 'historial', lista: historial });
+}
+
+/** Expediente válido para abrir una sesión: carpeta que existe y se llama «1234567 - Título». Vacío = carpeta general. */
+function carpetaValida(c) {
+  if (c === '') return true;
+  if (typeof c !== 'string' || c.length > 1000 || !path.isAbsolute(c)) return false;
+  if (!/^\d{7} - ./.test(path.basename(c))) return false;
+  try {
+    return fs.statSync(c).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Pide al plug-in que abra una sesión nueva (sin ventana) y espera a que la recoja: si no, PL/SQL Developer no está abierto. */
+async function pedirSesionNueva(carpeta) {
+  if (!carpetaValida(carpeta)) return { ok: false, error: 'Esa carpeta no es un expediente («1234567 - Título») que exista.' };
+  fs.mkdirSync(PETICIONES, { recursive: true });
+  const fichero = path.join(PETICIONES, `${Date.now()}-panel-${crypto.randomBytes(4).toString('hex')}.json`);
+  fs.writeFileSync(`${fichero}.tmp`, JSON.stringify({ accion: 'claude', carpeta, origen: 'panel' }));
+  fs.renameSync(`${fichero}.tmp`, fichero);
+  const hasta = Date.now() + 6000;
+  while (Date.now() < hasta) {
+    await new Promise(r => setTimeout(r, 250));
+    if (!fs.existsSync(fichero)) return { ok: true };
+  }
+  try {
+    fs.unlinkSync(fichero);
+  } catch {
+    return { ok: true }; // la ha recogido justo ahora
+  }
+  return { ok: false, error: 'PL/SQL Developer no ha contestado. Las sesiones se abren a través del plug-in (con sus normas y su acceso a las BBDD): abre PL/SQL Developer y vuelve a probar.' };
+}
+
 
 function enviar(ws, msg) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -312,11 +382,46 @@ async function atender(req, res) {
       return responder(res, 403, PAGINA_SIN_ACCESO, 'text/html; charset=utf-8');
     }
     cabecerasSeguridad(res);
+    const sesion = url.searchParams.get('sesion') || '';
     res.writeHead(302, {
-      Location: '/',
+      Location: ID_VALIDO.test(sesion) ? `/?sesion=${sesion}` : '/',
       'Set-Cookie': `panel_sesiones=${SECRETOS.web}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`,
     });
     return res.end();
+  }
+
+  // Para el plug-in (abrir.js): sesiones abiertas, pegar un texto en una y enseñarla en el panel
+  if (ruta === '/api/sesiones' && req.method === 'GET') {
+    if (!conClave(req)) return responder(res, 401, { error: 'sin permiso' });
+    return responder(res, 200, { sesiones: [...sesiones.values()].map(s => ({ id: s.id, titulo: s.titulo, carpeta: s.carpeta, viva: s.viva, sinVentana: s.sinVentana })) });
+  }
+  const mp = /^\/api\/sesiones\/([A-Za-z0-9_-]{8,64})\/pegar$/.exec(ruta);
+  if (mp && req.method === 'POST') {
+    if (!conClave(req)) return responder(res, 401, { error: 'sin permiso' });
+    const s = sesiones.get(mp[1]);
+    if (!s || !s.viva || !s.host) return responder(res, 404, { error: 'sesión no abierta' });
+    let datos;
+    try {
+      datos = JSON.parse(await leerCuerpo(req));
+    } catch {
+      return responder(res, 400, { error: 'JSON no válido' });
+    }
+    if (typeof datos.texto !== 'string' || datos.texto.length > 64 * 1024) return responder(res, 400, { error: 'texto no válido' });
+    enviar(s.host, { t: 'pegar', d: datos.texto });
+    return responder(res, 200, { ok: true });
+  }
+  if (ruta === '/api/enfocar' && req.method === 'POST') {
+    if (!conClave(req)) return responder(res, 401, { error: 'sin permiso' });
+    let datos;
+    try {
+      datos = JSON.parse(await leerCuerpo(req));
+    } catch {
+      return responder(res, 400, { error: 'JSON no válido' });
+    }
+    const id = String(datos.id || '');
+    if (!ID_VALIDO.test(id)) return responder(res, 400, { error: 'id no válido' });
+    for (const n of navegadores) enviar(n, { t: 'enfocar', id });
+    return responder(res, 200, { navegadores: navegadores.size });
   }
 
   // El mod de una sesión informa de lo que hace Claude
@@ -342,6 +447,11 @@ async function atender(req, res) {
     return servirFichero(res, path.join(WEB, 'index.html'));
   }
   if (VENDOR[ruta]) return servirFichero(res, VENDOR[ruta]);
+  if (ruta === '/ayuda') {
+    // La ayuda del plug-in: la publicación la copia en web/; en el repositorio está en ../ayuda
+    const enWeb = path.join(WEB, 'ayuda.html');
+    return servirFichero(res, fs.existsSync(enWeb) ? enWeb : path.join(__dirname, '..', 'ayuda', 'ayuda.html'));
+  }
   if (/^\/[a-z0-9-]+\.(js|css|svg|png|ico)$/.test(ruta)) return servirFichero(res, path.join(WEB, ruta.slice(1)));
   return responder(res, 404, { error: 'no existe' });
 }
@@ -391,13 +501,14 @@ function conectarAnfitrion(ws) {
       return;
     }
     if (!s) {
-      if (msg.t !== 'hola' || !/^[A-Za-z0-9_-]{8,64}$/.test(String(msg.id)) || typeof msg.claveMod !== 'string') return ws.close();
+      if (msg.t !== 'hola' || !ID_VALIDO.test(String(msg.id)) || typeof msg.claveMod !== 'string') return ws.close();
       s = sesiones.get(msg.id);
       if (s && s.host && s.host !== ws) s.host.close();
       if (!s) {
         s = nuevaSesion(msg);
         sesiones.set(s.id, s);
-        log('sesión nueva', s.id, JSON.stringify(s.titulo), s.carpeta);
+        log('sesión nueva', s.id, JSON.stringify(s.titulo), s.carpeta, s.sinVentana ? '(sin ventana)' : '');
+        apuntarHistorial(s);
       } else {
         // El anfitrión vuelve después de que se reiniciara el servidor o se cortara la conexión
         s.viva = true;
@@ -485,6 +596,8 @@ function pedirFoto(s, n) {
 
 function conectarNavegador(ws) {
   navegadores.add(ws);
+  enviar(ws, { t: 'prefs', prefs: preferencias });
+  enviar(ws, { t: 'historial', lista: historial });
   enviar(ws, { t: 'lista', sesiones: [...sesiones.values()].map(resumen), version: C.VERSION });
 
   ws.on('message', raw => {
@@ -508,6 +621,23 @@ function conectarNavegador(ws) {
       case 'in':
         // Lo que se escribe en el panel va a la terminal de esa sesión, como si se tecleara en ella
         if (s && s.host && s.viva && typeof msg.d === 'string' && msg.d.length <= 64 * 1024) enviar(s.host, { t: 'in', d: msg.d });
+        break;
+      case 'tam': {
+        // Solo las sesiones sin ventana toman el tamaño del panel; las demás, el de su ventana
+        const cols = msg.cols | 0;
+        const rows = msg.rows | 0;
+        if (s && s.host && s.viva && s.sinVentana && cols >= 20 && cols <= 500 && rows >= 5 && rows <= 200 && (cols !== s.cols || rows !== s.rows)) {
+          enviar(s.host, { t: 'resize', cols, rows });
+        }
+        break;
+      }
+      case 'prefs':
+        if (guardarPreferencias(msg.prefs)) for (const n of navegadores) if (n !== ws) enviar(n, { t: 'prefs', prefs: preferencias });
+        break;
+      case 'nueva':
+        pedirSesionNueva(typeof msg.carpeta === 'string' ? msg.carpeta.trim() : null)
+          .catch(e => ({ ok: false, error: `No he podido pedir la sesión: ${e.message}` }))
+          .then(r => enviar(ws, { t: 'nueva', ...r }));
         break;
       case 'cerrar':
         if (s && s.host && s.viva) {

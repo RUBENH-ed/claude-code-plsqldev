@@ -133,10 +133,82 @@ internal static class Panel
 
     /// <summary>
     /// Argumentos para lanzar <paramref name="command"/> dentro del anfitrión del panel:
-    /// node anfitrion.js --titulo ... --carpeta ... -- command.
+    /// node anfitrion.js --titulo ... --carpeta ... -- command. Con <paramref name="id"/>, sin ventana: la sesión solo
+    /// se ve en el panel (que la enseña por ese id).
     /// </summary>
-    public static string HostArguments(string dir, string title, string folder, string command) =>
-        $"{Arg(Path.Combine(dir, "anfitrion.js"))} --titulo {Arg(title)} --carpeta {Arg(folder)} -- {command}";
+    public static string HostArguments(string dir, string title, string folder, string command, string? id = null) =>
+        $"{Arg(Path.Combine(dir, "anfitrion.js"))} --titulo {Arg(title)} --carpeta {Arg(folder)}" +
+        (id != null ? $" --id {id} --sin-ventana" : "") + $" -- {command}";
+
+    /// <summary>Identificador para una sesión nueva (el anfitrión lo usa y el panel la enseña por él).</summary>
+    public static string NewId() => Guid.NewGuid().ToString("N")[..20];
+
+    /// <summary>
+    /// Preferencia del panel «Ventanas de Windows Terminal: ocultar»: las sesiones se abren sin ventana y solo se ven en
+    /// el panel. La guarda el propio panel en %APPDATA%\ClaudeCodePlsql\panel\preferencias.json.
+    /// </summary>
+    public static bool HideWindows()
+    {
+        try
+        {
+            string file = Path.Combine(Config.Dir, "panel", "preferencias.json");
+            if (!File.Exists(file)) return false;
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file, Encoding.UTF8));
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                   doc.RootElement.TryGetProperty("ventanas", out var v) &&
+                   v.ValueKind == System.Text.Json.JsonValueKind.String && v.GetString() == "ocultar";
+        }
+        catch (Exception e)
+        {
+            Log.Error(e);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Si en el panel hay una sesión abierta con ese título, deja <paramref name="text"/> en su cuadro de mensaje (sin
+    /// enviarlo) y la enseña. True si la había.
+    /// </summary>
+    public static bool Reuse((string Node, string Dir) panel, string title, string text, string tempDir)
+    {
+        string? file = null;
+        try
+        {
+            string args = $"{Arg(Path.Combine(panel.Dir, "abrir.js"))} --titulo {Arg(title)}";
+            if (text.Length > 0)
+            {
+                Directory.CreateDirectory(tempDir);
+                file = Path.Combine(tempDir, $"pegar-{DateTime.Now:yyyyMMdd-HHmmss-fff}.txt");
+                File.WriteAllText(file, text, new UTF8Encoding(false));
+                args += $" --pegar {Arg(file)}";
+            }
+            var (exit, _, error) = Run(panel.Node, args, panel.Dir, 15_000);
+            if (exit != 0 && exit != 3) Log.Info($"No he podido buscar la sesión en el panel: {error}");
+            return exit == 0;
+        }
+        finally
+        {
+            if (file != null) try { File.Delete(file); } catch { }
+        }
+    }
+
+    /// <summary>Enseña una sesión en el panel (en el que ya esté abierto o en uno nuevo), sin esperar.</summary>
+    public static void Show((string Node, string Dir) panel, string id)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(panel.Node, $"{Arg(Path.Combine(panel.Dir, "abrir.js"))} --sesion {id}")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = panel.Dir,
+            })?.Dispose();
+        }
+        catch (Exception e)
+        {
+            Log.Error(e);
+        }
+    }
 
     /// <summary>Un argumento para la línea de comandos de Windows, con las comillas y barras que hagan falta.</summary>
     public static string Arg(string s)

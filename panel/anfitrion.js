@@ -2,7 +2,10 @@
 // Anfitrión de una sesión: ejecuta un comando (el lanzador de Claude que prepara el plug-in) dentro de una
 // pseudoterminal y la comparte con el panel de sesiones.
 //
-//   node anfitrion.js --titulo "Claude Code - 1234567 Título" --carpeta "C:\...\1234567 - Título" -- powershell.exe -NoLogo ...
+//   node anfitrion.js --titulo "Claude Code - 1234567 Título" --carpeta "C:\...\1234567 - Título" [--id <id>] -- powershell.exe -NoLogo ...
+//
+// Con --sin-ventana (el plug-in lo lanza así cuando las sesiones se ocultan), o sin terminal, la sesión solo se ve en el
+// panel y toma el tamaño que le manda el panel.
 //
 // Para quien está en la ventana de Windows Terminal no cambia nada: ve y teclea en la sesión como siempre. Además:
 //   - lo que sale por la terminal se manda al servidor del panel, que lo enseña en el navegador;
@@ -34,6 +37,8 @@ function leerArgumentos(argv) {
     if (a === '--titulo') op.titulo = argv[++i] ?? op.titulo;
     else if (a === '--carpeta') op.carpeta = argv[++i] ?? op.carpeta;
     else if (a === '--sin-servidor') op.servidor = false;
+    else if (a === '--id') op.id = argv[++i];
+    else if (a === '--sin-ventana') op.sinVentana = true;
     else {
       op.comando = argv.slice(i);
       break;
@@ -46,10 +51,11 @@ function leerArgumentos(argv) {
 }
 
 const op = leerArgumentos(process.argv.slice(2));
-const ID = crypto.randomBytes(12).toString('base64url');
+const ID = /^[A-Za-z0-9_-]{8,64}$/.test(String(op.id || '')) ? op.id : crypto.randomBytes(12).toString('base64url');
 const CLAVE_MOD = crypto.randomBytes(24).toString('base64url');
 const URL_PANEL = `http://127.0.0.1:${C.puerto()}`;
-const esTty = !!process.stdout.isTTY;
+// Sin ventana, aunque Windows le dé una consola oculta, no se usa: la sesión solo se ve en el panel
+const esTty = !op.sinVentana && !!process.stdout.isTTY;
 
 let cols = (esTty && process.stdout.columns) || 120;
 let rows = (esTty && process.stdout.rows) || 30;
@@ -150,12 +156,18 @@ function foto() {
  * de línea en medio y la sesión ha pedido el modo de pegado, se le ponen esas marcas.
  */
 function conMarcasDePegado(texto) {
-  if (process.platform !== 'win32' || !pantalla.modes.bracketedPasteMode) return texto;
+  if (process.platform !== 'win32') return texto;
+  return pegado(texto, false);
+}
+
+/** Texto pegado: con las marcas de pegado si la sesión las usa (si `siempre`, aunque sea una sola línea). */
+function pegado(texto, siempre) {
+  if (!pantalla.modes.bracketedPasteMode) return texto;
   if (texto.includes('\x1b[200~') || texto.startsWith('\x1b')) return texto;
   const salto = texto.search(/[\r\n]/);
-  if (salto < 0) return texto;
+  if (salto < 0) return siempre ? `\x1b[200~${texto}\x1b[201~` : texto;
   const hayTextoDespues = /[^\r\n]/.test(texto.slice(salto));
-  if (!hayTextoDespues && texto.length < 64) return texto;
+  if (!siempre && !hayTextoDespues && texto.length < 64) return texto;
   return `\x1b[200~${texto}\x1b[201~`;
 }
 
@@ -169,18 +181,21 @@ if (esTty && process.stdin.isTTY) {
   process.stdin.resume();
 }
 
+function redimensionar(c, r) {
+  if (c === cols && r === rows) return;
+  cols = c;
+  rows = r;
+  try {
+    proceso.resize(cols, rows);
+  } catch {
+    // ya ha terminado
+  }
+  pantalla.resize(cols, rows);
+  enviar({ t: 'size', cols, rows });
+}
+
 if (esTty) {
-  process.stdout.on('resize', () => {
-    cols = process.stdout.columns || cols;
-    rows = process.stdout.rows || rows;
-    try {
-      proceso.resize(cols, rows);
-    } catch {
-      // ya ha terminado
-    }
-    pantalla.resize(cols, rows);
-    enviar({ t: 'size', cols, rows });
-  });
+  process.stdout.on('resize', () => redimensionar(process.stdout.columns || cols, process.stdout.rows || rows));
 }
 
 // Al cerrar la ventana de golpe, que no quede nada colgado
@@ -244,6 +259,7 @@ async function conectar() {
       pid: process.pid,
       inicio: INICIO,
       version: C.VERSION,
+      sinVentana: !esTty,
     });
   });
   ws.on('message', raw => {
@@ -267,6 +283,14 @@ async function conectar() {
       }
       case 'in':
         if (typeof msg.d === 'string') proceso.write(msg.d);
+        break;
+      case 'pegar':
+        // Texto que deja el plug-in en el cuadro de Claude (sin pulsar Intro: lo envía la persona)
+        if (typeof msg.d === 'string') proceso.write(pegado(msg.d, true));
+        break;
+      case 'resize':
+        // Solo sin ventana: con ventana manda el tamaño de la ventana
+        if (!esTty && msg.cols >= 20 && msg.cols <= 500 && msg.rows >= 5 && msg.rows <= 200) redimensionar(msg.cols | 0, msg.rows | 0);
         break;
       case 'cerrar':
         try {

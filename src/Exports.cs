@@ -15,12 +15,13 @@ public static unsafe class Exports
     private const string Description = "Claude Code para PL/SQL Developer";
 
     private const string AboutText =
-        "Claude Code para PL/SQL Developer 1.2 (EDISA)\r\n\r\n" +
+        "Claude Code para PL/SQL Developer 1.8 (EDISA)\r\n\r\n" +
         "Pasa el codigo de la ventana activa a Claude Code, abre una sesion en la terminal " +
         "y carga en el editor los cambios que haga Claude.\r\n\r\n" +
         "Si el fichero esta en una carpeta de expediente (1234567 - Titulo), Claude se abre en ella.\r\n" +
         "Una ventana de Claude por carpeta, como panel a la derecha, que retoma la conversacion del proyecto.\r\n\r\n" +
-        "Configuracion: %APPDATA%\\ClaudeCodePlsql\\ClaudeCode.ini";
+        "Configuracion: %APPDATA%\\ClaudeCodePlsql\\ClaudeCode.ini\r\n\r\n" +
+        "Que hace cada boton: Claude Code > Ayuda.";
 
     // Las cadenas que se devuelven al IDE deben seguir vivas después de la llamada: se reservan una vez y no se liberan.
     private static readonly Dictionary<string, nint> HostStrings = new();
@@ -120,6 +121,7 @@ public static unsafe class Exports
                     Plugin.MenuDocs => m + "Documentación del e&xpediente",
                     Plugin.MenuInstall => m + "Preparar &instalación",
                     Plugin.MenuSessions => m + "Panel de &sesiones",
+                    Plugin.MenuHelp => m + "A&yuda",
                     _ => "",
                 });
             }
@@ -147,6 +149,8 @@ public static unsafe class Exports
                 Plugin.MenuInstall => "ITEM=Preparar instalación",
                 20 => "GROUP=Sesiones",
                 Plugin.MenuSessions => "LARGEITEM=Panel de sesiones",
+                22 => "GROUP=Ayuda",
+                Plugin.MenuHelp => "LARGEITEM=Ayuda",
                 _ => "",
             });
         }

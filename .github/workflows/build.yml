@@ -65,14 +65,16 @@ jobs:
           node-version: '22'
 
       # El panel de sesiones se publica con sus dependencias ya bajadas, con las piezas nativas de Windows de 64 bits:
-      # en el equipo solo hace falta Node.js. Su VERSION cambia solo cuando cambia algo de la carpeta panel.
+      # en el equipo solo hace falta Node.js. Lleva también la ayuda del plug-in (la enseña en /ayuda). Su VERSION
+      # cambia solo cuando cambia algo de las carpetas panel o ayuda.
       - name: Preparar el panel de sesiones
         run: |
+          cp ayuda/ayuda.html panel/web/ayuda.html
           cd panel
           npm ci --omit=dev --os=win32 --cpu=x64 --no-audit --no-fund
           find node_modules -name '*.pdb' -delete
           rm -rf pruebas
-          git rev-parse --short=12 HEAD:panel > VERSION
+          echo "$(git rev-parse HEAD:panel)$(git rev-parse HEAD:ayuda)" | sha1sum | cut -c1-12 > VERSION
 
       - name: Publicar en la rama publicado
         run: |

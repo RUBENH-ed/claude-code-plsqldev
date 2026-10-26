@@ -29,8 +29,13 @@
     <StripSymbols>true</StripSymbols>
     <OptimizationPreference>Size</OptimizationPreference>
 
-    <Version>1.2.0</Version>
+    <Version>1.8.0</Version>
     <Product>Claude Code para PL/SQL Developer</Product>
   </PropertyGroup>
+
+  <!-- La ayuda (botón Ayuda) va dentro de la DLL: el plug-in la deja en %APPDATA%\ClaudeCodePlsql al abrirla -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\ayuda\ayuda.html" LogicalName="ayuda.html" />
+  </ItemGroup>
 
 </Project>

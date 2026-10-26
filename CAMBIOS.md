@@ -7,6 +7,15 @@
   cerrada) y lo que está haciendo; su terminal en directo, en la que puedes escribir; la actividad (mensajes,
   herramientas, permisos, respuestas); la vista *Todas* con todas las terminales a la vez, y avisos del navegador.
   En Windows Terminal todo sigue igual. Necesita Node.js 18 o superior; sin él, Claude se abre como antes.
+- **Panel: Nueva sesión, sesiones sin ventana y personalizar.** Botón *Nueva sesión* para abrir Claude en un
+  expediente desde el panel (lo atiende el plug-in, con sus normas y BBDD). Opción *Ventanas de Windows Terminal:
+  ocultar*: las sesiones corren en segundo plano y solo se ven en el panel. La lista y la actividad se pliegan (o las
+  dos con *Ampliar*) y se colocan donde quieras (lista a la izquierda, arriba o a la derecha; actividad a la derecha,
+  debajo o a la izquierda). Temas Pizarra, Noche, Claro y Alto contraste, colores propios y tamaño de letra; todo se
+  recuerda en el equipo. Revisado con pautas de interfaz y accesibilidad (contraste, nombres de botones, teclado: F6
+  sale de la terminal).
+- **Ayuda**: botón nuevo en la cinta con una guía de lo que hace cada botón, para quien instala el plug-in sin que se
+  lo expliquen. Se abre sola la primera vez.
 - Claves nuevas en `ClaudeCode.ini`: `PanelSesiones`, `RutaNode` y `RutaPanel` (sección `[Panel]`).
 - El hook de solo consultas protege también la carpeta de claves del panel (`%APPDATA%\ClaudeCodePlsql\panel`).
 - `actualizar.ps1` instala y pone al día el panel en `%APPDATA%\ClaudeCodePlsql\panel-app`; `instalar.ps1` comprueba

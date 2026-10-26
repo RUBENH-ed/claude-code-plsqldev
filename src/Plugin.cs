@@ -28,7 +28,7 @@ internal static unsafe class Plugin
     public const int MenuOpen = 3, MenuAskSelection = 4, MenuPull = 5, MenuCopyRef = 6, MenuFolder = 8, MenuConfig = 9,
         MenuConnect = 11, MenuDisconnect = 12, MenuSetDev = 13,
         MenuCompare = 15, MenuReview = 16, MenuExplainError = 17, MenuDocs = 18, MenuInstall = 19,
-        MenuSessions = 21;
+        MenuSessions = 21, MenuHelp = 23;
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly Dictionary<int, Link> Links = new();
@@ -68,6 +68,7 @@ internal static unsafe class Plugin
         }
 
         StartUpdate();
+        Help.CheckFirstRun();
 
         if (_timer == 0)
             _timer = Win32.SetTimer(0, 0, 1500, (nint)(delegate* unmanaged[Stdcall]<nint, uint, nuint, uint, void>)&OnTimer);
@@ -107,6 +108,7 @@ internal static unsafe class Plugin
                 case MenuDocs: ProjectTask(Prompts.DocsTask, "Claude prepara la documentación del expediente"); break;
                 case MenuInstall: ProjectTask(Prompts.InstallTask, "Claude prepara la instalación del expediente"); break;
                 case MenuSessions: Panel.Open(); break;
+                case MenuHelp: Help.Open(); break;
             }
         }
         finally
@@ -848,6 +850,11 @@ internal static unsafe class Plugin
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
                 var r = doc.RootElement;
                 string action = Prop(r, "accion"), path = Prop(r, "fichero"), text = Prop(r, "texto"), db = Prop(r, "bd");
+                if (action == "claude")
+                {
+                    OpenFromPanel(Prop(r, "carpeta"));
+                    continue;
+                }
                 int type = r.TryGetProperty("tipo", out var t) && t.TryGetInt32(out int n) ? n : 0;
 
                 int ix = -1;
@@ -879,6 +886,26 @@ internal static unsafe class Plugin
                 Log.Error(e);
             }
         }
+    }
+
+    /// <summary>
+    /// Botón «Nueva sesión» del panel: abre Claude en un expediente (o en la carpeta general si llega vacía), sin ventana,
+    /// con las mismas normas y BBDD que si se abriera desde la cinta. El panel solo manda carpetas de expediente.
+    /// </summary>
+    private static void OpenFromPanel(string folder)
+    {
+        Config.Load();
+        Workspace ws;
+        string f = folder.Trim().TrimEnd('\\', '/');
+        if (f.Length == 0) ws = Workspace.General(Config.Workspace);
+        else if (Workspace.IsProjectFolderName(System.IO.Path.GetFileName(f)) && Directory.Exists(f)) ws = Workspace.Project(f);
+        else
+        {
+            Log.Info($"El panel ha pedido abrir Claude en una carpeta que no es un expediente: {folder}");
+            return;
+        }
+        if (ws.IsProject) Config.SaveLastProject(ws.Root);
+        Launch(ws, Prompts.FromPanel(ws), "", "Claude abierto desde el panel" + Where(ws), onlyInPanel: true);
     }
 
     /// <summary>Conecta en PL/SQL Developer una de las BBDD dadas de alta para Claude. Devuelve su índice o -1.</summary>
@@ -930,6 +957,7 @@ internal static unsafe class Plugin
         try
         {
             CheckUpdate();
+            Help.OpenIfPending();
             CheckRequests();
             PlacePending();
             CheckActiveWindow();
@@ -1002,10 +1030,22 @@ internal static unsafe class Plugin
     /// Abre Claude Code en la carpeta de trabajo. Con PanelLateral, si ya hay una ventana de Claude de esa carpeta,
     /// la trae al frente y deja en el portapapeles <paramref name="again"/> para pegarlo, en vez de abrir otra.
     /// </summary>
-    private static bool Launch(Workspace ws, string prompt, string again, string status)
+    private static bool Launch(Workspace ws, string prompt, string again, string status, bool onlyInPanel = false)
     {
         string title = ClaudeTitle(ws);
-        if (Config.SidePanel)
+
+        // Panel de sesiones: la sesión se abre dentro de su anfitrión, que la comparte con el panel, y el mod del panel
+        // le cuenta lo que hace Claude. Sin Node.js o sin panel, Claude se abre como siempre. Con la preferencia del
+        // panel «ocultar ventanas» (o si lo pide el propio panel), sin ventana de Windows Terminal: solo en el panel.
+        var panel = Panel.Available();
+        if (onlyInPanel && panel == null)
+        {
+            Win32.Message($"No se puede abrir la sesión en el panel: {Panel.LastProblem}", Win32.MB_ICONWARNING);
+            return false;
+        }
+        bool hidden = panel != null && (onlyInPanel || Panel.HideWindows());
+
+        if (Config.SidePanel && !hidden)
         {
             nint existing = Win32.FindTopWindow(title);
             if (existing != 0)
@@ -1018,6 +1058,15 @@ internal static unsafe class Plugin
                     : "Claude ya estaba abierto para esta carpeta (no he podido copiar la referencia: usa Copiar referencia).");
                 return true;
             }
+        }
+
+        // Una sola sesión por carpeta también en el panel: si ya hay una, se le deja el texto escrito y se enseña
+        if (panel != null && (hidden || Config.SidePanel) && Panel.Reuse(panel.Value, title, again, ws.InternalDir))
+        {
+            Ide.Status(again.Length > 0
+                ? "Claude ya estaba abierto para esta carpeta: te he dejado el mensaje escrito en el panel; revísalo y pulsa Intro."
+                : "Claude ya estaba abierto para esta carpeta: lo tienes en el panel de sesiones.");
+            return true;
         }
 
         EnsureWorkspace(ws);
@@ -1056,9 +1105,6 @@ internal static unsafe class Plugin
             options.Add("--mcp-config");
             options.Add(PsQuote(mcpFile));
         }
-        // Panel de sesiones: la sesión se abre dentro de su anfitrión, que la comparte con el panel, y el mod del panel
-        // le cuenta lo que hace Claude. Sin Node.js o sin panel, Claude se abre como siempre.
-        var panel = Panel.Available();
         if (panel != null)
         {
             options.Add("--plugin-dir");
@@ -1105,6 +1151,31 @@ internal static unsafe class Plugin
         string wt = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "wt.exe");
         bool useWt = Config.Terminal == "wt" || (Config.Terminal == "auto" && File.Exists(wt));
+
+        if (hidden)
+        {
+            // Sin ventana: el anfitrión corre oculto y la sesión se ve y se usa en el panel, que se abre en ella
+            try
+            {
+                string id = Panel.NewId();
+                Process.Start(new ProcessStartInfo(panel!.Value.Node,
+                    Panel.HostArguments(panel.Value.Dir, title, ws.Root, $"{Config.Shell} {psArgs}", id))
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WorkingDirectory = ws.Root,
+                })?.Dispose();
+                Panel.Show(panel.Value, id);
+                Ide.Status(status + " (en el panel de sesiones)");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Log.Error(e);
+                Win32.Message($"No se pudo abrir la sesión en el panel (Node.js):\n\n{e.Message}", Win32.MB_ICONERROR);
+                return false;
+            }
+        }
 
         try
         {

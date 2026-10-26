@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Claude Code para PL/SQL Developer: ayuda</title>
+<style>
+  :root {
+    --fondo: #f6f7f9; --hoja: #ffffff; --texto: #1b2230; --suave: #4d596b; --tenue: #6d788a; --linea: #dfe3ea;
+    --acento: #2f6db5; --codigo: #eef1f5; --icono: #434a54;
+    --trabajando: #a8700c; --permiso: #c6372c; --espera: #1d7f57; --reposo: #6b778a;
+    --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #161b24; --hoja: #1d2430; --texto: #e5eaf1; --suave: #a9b4c4; --tenue: #8591a3; --linea: #2f3a4c;
+      --acento: #8fb4ea; --codigo: #262f3d; --icono: #c9d1dc;
+      --trabajando: #e9b44c; --permiso: #f2665c; --espera: #4fc79a; --reposo: #8a96a8;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 16px; }
+  body { margin: 0; background: var(--fondo); color: var(--texto); font: 15px/1.6 var(--ui); -webkit-font-smoothing: antialiased; }
+  a { color: var(--acento); }
+  :focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+  .pagina { display: grid; grid-template-columns: 240px minmax(0, 760px); gap: 48px; max-width: 1080px; margin: 0 auto; padding: 40px 32px 80px; }
+  nav.indice { position: sticky; top: 24px; align-self: start; font-size: 14px; }
+  nav.indice p { font-weight: 600; margin: 0 0 8px; }
+  nav.indice ol { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  nav.indice li { margin: 2px 0; }
+  nav.indice a { color: var(--suave); text-decoration: none; display: block; padding: 3px 8px; border-left: 2px solid var(--linea); }
+  nav.indice a:hover { color: var(--texto); border-left-color: var(--acento); }
+
+  header.portada { margin-bottom: 36px; }
+  header.portada h1 { font-size: 30px; line-height: 1.2; letter-spacing: -.02em; margin: 0 0 10px; }
+  header.portada p { font-size: 17px; color: var(--suave); margin: 0; max-width: 62ch; }
+
+  section { margin-bottom: 44px; }
+  h1, h2 { text-wrap: balance; }
+  .saltar { position: absolute; left: 12px; top: -48px; background: var(--hoja); padding: 6px 12px; border-radius: 6px; }
+  .saltar:focus { top: 12px; }
+  h2 { font-size: 21px; letter-spacing: -.01em; margin: 0 0 12px; padding-top: 4px; }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p, li { max-width: 68ch; }
+  p { margin: 0 0 12px; }
+  ul, ol { padding-left: 22px; margin: 0 0 14px; }
+  li { margin-bottom: 5px; }
+  code, kbd { font-family: var(--mono); font-size: 13.5px; background: var(--codigo); padding: 1px 5px; border-radius: 4px; }
+  kbd { border: 1px solid var(--linea); border-bottom-width: 2px; }
+
+  .pasos { list-style: none; padding: 0; counter-reset: paso; }
+  .pasos > li { position: relative; padding: 0 0 14px 42px; counter-increment: paso; }
+  .pasos > li::before { content: counter(paso); position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--hoja); border: 1px solid var(--linea); font-weight: 600; font-size: 14px; }
+
+  .grupo { background: var(--hoja); border: 1px solid var(--linea); border-radius: 10px; padding: 6px 18px; margin: 0 0 16px; }
+  .grupo h3 { margin: 12px 0 4px; font-size: 15px; color: var(--suave); }
+  .boton { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 2px 12px; padding: 12px 0; border-top: 1px solid var(--linea); }
+  .boton:first-of-type { border-top: 0; }
+  .boton .icono { grid-row: span 2; width: 32px; height: 32px; display: grid; place-items: center; color: var(--icono); }
+  .boton .icono svg { width: 24px; height: 24px; }
+  .boton .icono.grande svg { width: 30px; height: 30px; }
+  .boton b { font-size: 15px; }
+  .boton p { margin: 0; color: var(--suave); }
+
+  .nota { border-left: 4px solid var(--acento); background: var(--hoja); padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 0 0 16px; }
+  .nota.aviso { border-left-color: var(--permiso); }
+  .nota p:last-child { margin-bottom: 0; }
+
+  .pilotos { list-style: none; padding: 0; }
+  .pilotos li { position: relative; padding-left: 18px; }
+  .pilotos li::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 5px; border-radius: 3px; background: var(--c); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 0 0 16px; background: var(--hoja); border: 1px solid var(--linea); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-top: 1px solid var(--linea); }
+  th { background: var(--codigo); font-weight: 600; border-top: 0; }
+  td:first-child { white-space: nowrap; }
+
+  dl.problemas dt { font-weight: 600; margin-top: 14px; }
+  dl.problemas dd { margin: 4px 0 0; color: var(--suave); max-width: 68ch; }
+
+  @media (max-width: 860px) {
+    .pagina { grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 24px 18px 60px; }
+    nav.indice { position: static; }
+    td:first-child { white-space: normal; }
+  }
+  @media print {
+    nav.indice { display: none; }
+    .pagina { display: block; }
+  }
+</style>
+</head>
+<body>
+<a class="saltar" href="#contenido">Ir al contenido</a>
+<div class="pagina">
+  <nav class="indice" aria-label="Índice">
+    <p>En esta ayuda</p>
+    <ol>
+      <li><a href="#que-es">Qué es</a></li>
+      <li><a href="#primeros-pasos">Primeros pasos</a></li>
+      <li><a href="#botones">Los botones, uno a uno</a></li>
+      <li><a href="#expedientes">Expedientes y carpetas</a></li>
+      <li><a href="#bbdd">Bases de datos</a></li>
+      <li><a href="#panel">Panel de sesiones</a></li>
+      <li><a href="#configuracion">Configuración</a></li>
+      <li><a href="#problemas">Si algo no funciona</a></li>
+    </ol>
+  </nav>
+
+  <main id="contenido">
+    <header class="portada">
+      <h1>Claude Code para PL/SQL Developer</h1>
+      <p>Trabaja con Claude sobre el código que tienes abierto en PL/SQL Developer: le pasas la ventana, Claude propone o hace los cambios, y tú los revisas, compilas y guardas como siempre.</p>
+    </header>
+
+    <section id="que-es">
+      <h2>Qué es</h2>
+      <p>Un plug-in que añade a PL/SQL Developer la pestaña <b>Claude Code</b>. Con un botón, Claude Code se abre en una terminal (a la derecha de PL/SQL Developer) con el código de la ventana activa ya cargado. Claude trabaja sobre una <b>copia</b> de esa ventana; cuando la cambia, el plug-in te ofrece cargar los cambios en el editor.</p>
+      <p>Claude nunca compila, ejecuta ni guarda nada en la base de datos: eso lo sigues haciendo tú. Contra la base de datos solo puede hacer consultas (<code>SELECT</code>), y solo en las bases que tú conectes.</p>
+    </section>
+
+    <section id="primeros-pasos">
+      <h2>Primeros pasos</h2>
+      <ol class="pasos">
+        <li>Abre en PL/SQL Developer la ventana con la que quieres trabajar: un paquete, un procedimiento, una ventana SQL o de test.</li>
+        <li>Pulsa <b>Abrir en Claude Code</b> (el botón grande naranja de la pestaña <b>Claude Code</b>). Se abre Claude a la derecha, con tu código ya leído.</li>
+        <li>Escríbele lo que necesitas: «explícame este cursor», «añade el control de errores», «¿por qué falla con fechas vacías?».</li>
+        <li>Si Claude cambia el código, al volver a PL/SQL Developer te pregunta si quieres <b>cargar los cambios</b> en la ventana. Revísalos, compila y guarda como siempre (y si no te convencen, <kbd>Ctrl</kbd>+<kbd>Z</kbd>).</li>
+      </ol>
+      <div class="nota">
+        <p>La primera vez, pulsa <b>Fijar como BD de desarrollo</b> con una ventana conectada a desarrollo: así Claude puede consultar tablas y código para entender lo que hace tu programa.</p>
+      </div>
+    </section>
+
+    <section id="botones">
+      <h2>Los botones, uno a uno</h2>
+      <p>Están en la pestaña <b>Claude Code</b> de la cinta (en versiones antiguas, en <b>Tools &gt; Claude Code</b>). Los tres primeros también salen con el botón derecho en el editor.</p>
+
+      <div class="grupo">
+        <h3>Claude Code</h3>
+        <div class="boton"><span class="icono grande"><svg aria-hidden="true" viewBox="0 0 21 21"><path d="M10.5 8.3L10.5 1.2M11.6 8.59L14.1 4.26M12.41 9.4L18.55 5.85M12.7 10.5L17.7 10.5M12.41 11.6L18.55 15.15M11.6 12.41L14.1 16.74M10.5 12.7L10.5 19.8M9.4 12.41L6.9 16.74M8.59 11.6L2.45 15.15M8.3 10.5L3.3 10.5M8.59 9.4L2.45 5.85M9.4 8.59L6.9 4.26" fill="none" stroke="#D97757" stroke-width="2.2" stroke-linecap="round"/></svg></span><b>Abrir en Claude Code</b><p>Pasa a Claude el texto de la ventana activa y abre su sesión. Si ya había una sesión abierta de esa carpeta, la trae al frente y te deja en el portapapeles la referencia a la ventana para que la pegues (<kbd>Ctrl</kbd>+<kbd>V</kbd> e <kbd>Intro</kbd>).</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><path d="M3.5 3.5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3v-3H3.5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" fill="none" stroke="currentColor"/><path d="M8.8 7.5a1.8 1.8 0 1 1 2.6 1.6c-.6.3-.9.7-.9 1.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10.5" cy="12.3" r=".8" fill="currentColor"/></svg></span><b>Preguntar por lo seleccionado</b><p>Igual, pero además le pasa el trozo que tienes seleccionado y la línea del cursor. Úsalo para preguntar por una consulta o un bloque concreto.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><path d="M5.5 2.5h7l3.5 3.5v12.5h-10.5z" fill="none" stroke="currentColor"/><path d="M10.75 8v6M8 11.5l2.75 2.75 2.75-2.75" fill="none" stroke="#2F80ED" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span><b>Traer cambios de Claude</b><p>Carga en el editor lo que Claude haya cambiado en su copia. Normalmente no hace falta: el plug-in te lo pregunta solo al volver a PL/SQL Developer.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><rect x="5" y="3.5" width="11" height="15" rx="1.5" fill="none" stroke="currentColor"/><rect x="8" y="2" width="5" height="3" rx="1" fill="currentColor"/><path d="M8.5 10h4M8.5 13h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><b>Copiar referencia para Claude</b><p>Actualiza la copia de la ventana y copia algo como <code>@ventanas/OBJETO.pkb</code> para pegarlo en una sesión de Claude que ya tengas abierta.</p></div>
+      </div>
+
+      <div class="grupo">
+        <h3>Ajustes</h3>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><path d="M2.5 6v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H10L8.5 5h-5a1 1 0 0 0-1 1z" fill="none" stroke="currentColor"/></svg></span><b>Abrir carpeta de trabajo</b><p>Abre en el Explorador la carpeta donde Claude trabaja con esta ventana (la del expediente o la general).</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><g fill="currentColor"><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(45 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(90 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(135 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(180 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(225 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(270 10.5 10.5)"/><rect x="9.3" y="1.4" width="2.4" height="3.8" rx=".6" transform="rotate(315 10.5 10.5)"/></g><circle cx="10.5" cy="10.5" r="4.6" fill="none" stroke="currentColor" stroke-width="2.8"/></svg></span><b>Configurar</b><p>Abre el fichero de configuración, <code>ClaudeCode.ini</code>. Mira <a href="#configuracion">Configuración</a>.</p></div>
+      </div>
+
+      <div class="grupo">
+        <h3>Base de datos</h3>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><ellipse cx="9.5" cy="5" rx="6" ry="2.5" fill="none" stroke="currentColor"/><path d="M3.5 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M3.5 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" fill="none" stroke="currentColor"/><circle cx="16" cy="16" r="4" fill="#27AE60"/><path d="M16 13.8v4.4M13.8 16h4.4" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/></svg></span><b>Conectar a BBDD</b><p>Deja que Claude consulte la base de datos de la ventana activa (por ejemplo, la de pruebas de un cliente) en los expedientes de ese cliente. Si el nombre no parece de pruebas o desarrollo, te pide confirmación.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><ellipse cx="9.5" cy="5" rx="6" ry="2.5" fill="none" stroke="currentColor"/><path d="M3.5 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M3.5 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" fill="none" stroke="currentColor"/><circle cx="16" cy="16" r="4" fill="#EB5757"/><path d="M14.5 14.5l3 3M17.5 14.5l-3 3" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/></svg></span><b>Desconectar BBDD</b><p>Quita las bases conectadas en el proyecto de la ventana. La de desarrollo se queda.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><ellipse cx="9.5" cy="5" rx="6" ry="2.5" fill="none" stroke="currentColor"/><path d="M3.5 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M3.5 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" fill="none" stroke="currentColor"/><circle cx="16" cy="16" r="4" fill="#2F80ED"/><path d="M14 16l1.5 1.5 2.5-3" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><b>Fijar como BD de desarrollo</b><p>Hace de la sesión activa la base que Claude consulta por defecto en todos los proyectos.</p></div>
+      </div>
+
+      <div class="grupo">
+        <h3>Herramientas</h3>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><rect x="2.5" y="3.5" width="6.5" height="14" rx="1" fill="none" stroke="currentColor"/><rect x="12" y="3.5" width="6.5" height="14" rx="1" fill="none" stroke="currentColor"/><path d="M6.5 8.5h8M12.5 6.5l2 2-2 2M14.5 12.5h-8M8.5 10.5l-2 2 2 2" fill="none" stroke="#2F80ED" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><b>Comparar con otra BD</b><p>Claude compara el objeto de la ventana entre desarrollo y las bases conectadas del proyecto: qué cambia y qué versión tiene cada una.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><path d="M5.5 2.5h7l3.5 3.5v12.5h-10.5z" fill="none" stroke="currentColor"/><path d="M7.5 11.5l2 2 4-4.5" fill="none" stroke="#27AE60" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><b>Revisar normas</b><p>Claude revisa la ventana con las normas de la empresa y busca errores probables. Te da una lista por línea, de lo más grave a lo menos, sin tocar nada.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><circle cx="10.5" cy="10.5" r="7.5" fill="none" stroke="#EB5757" stroke-width="1.5"/><path d="M10.5 6v5.5" stroke="#EB5757" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.5" cy="14.6" r="1.1" fill="#EB5757"/></svg></span><b>Explicar error</b><p>Copia el error que te ha dado PL/SQL Developer y pulsa: Claude explica la causa y cómo arreglarlo. Si no hay nada copiado, lo busca en <code>ALL_ERRORS</code>.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><path d="M7.5 2.5h6.5l3 3v10.5h-9.5z" fill="none" stroke="currentColor"/><path d="M5 5.5v13h9" fill="none" stroke="currentColor"/><path d="M10 8.5h4.5M10 11h4.5M10 13.5h3" stroke="#2F80ED" stroke-width="1.2" stroke-linecap="round"/></svg></span><b>Documentación</b><p>En un expediente: prepara el acta de entrega (A18) y el manual de desarrollo con sus plantillas.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><path d="M3.5 7l7-3.5 7 3.5v8l-7 3.5-7-3.5z" fill="none" stroke="currentColor" stroke-linejoin="round"/><path d="M3.5 7l7 3.5 7-3.5M10.5 10.5v8" fill="none" stroke="currentColor" stroke-linejoin="round"/><path d="M14 2v4M12.5 4.5L14 6l1.5-1.5" fill="none" stroke="#27AE60" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><b>Preparar instalación</b><p>En un expediente: lista los fuentes, decide el orden de compilación y escribe el script de instalación (te enseña antes la lista).</p></div>
+      </div>
+
+      <div class="grupo">
+        <h3>Sesiones y ayuda</h3>
+        <div class="boton"><span class="icono grande"><svg aria-hidden="true" viewBox="0 0 21 21"><rect x="1.5" y="2.5" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="5" y="6" width="2.6" height="9" rx="1.3" fill="#E9B44C"/><rect x="9.2" y="6" width="2.6" height="9" rx="1.3" fill="#27AE60"/><rect x="13.4" y="6" width="2.6" height="9" rx="1.3" fill="#EB5757"/></svg></span><b>Panel de sesiones</b><p>Abre el panel con todas tus sesiones de Claude, en directo. Mira <a href="#panel">Panel de sesiones</a>.</p></div>
+        <div class="boton"><span class="icono"><svg aria-hidden="true" viewBox="0 0 21 21"><circle cx="10.5" cy="10.5" r="7.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8.2 8.2a2.3 2.3 0 1 1 3.3 2.1c-.6.3-1 .8-1 1.4v.5" fill="none" stroke="#2F80ED" stroke-width="1.6" stroke-linecap="round"/><circle cx="10.5" cy="14.6" r="1" fill="#2F80ED"/></svg></span><b>Ayuda</b><p>Esta página.</p></div>
+      </div>
+    </section>
+
+    <section id="expedientes">
+      <h2>Expedientes y carpetas</h2>
+      <p>Claude se abre siempre en una carpeta, y desde ella ve tus ficheros:</p>
+      <ul>
+        <li>Si el fichero de la ventana está dentro de una carpeta de expediente (<code>1234567 - Título</code>), Claude se abre en <b>ese expediente</b> y retoma su conversación de la vez anterior. Hay una sola sesión de Claude por expediente.</li>
+        <li>Si la ventana no es de ningún expediente (por ejemplo, un paquete abierto desde la base de datos), te pregunta si usar el último expediente o la <b>carpeta general</b>.</li>
+      </ul>
+      <p>La copia de cada ventana se guarda como <code>PROPIETARIO.OBJETO.pkb</code> (o <code>.pks</code>, <code>.prc</code>, <code>.sql</code>…). El fichero original no lo toca nunca: los cambios le llegan cuando los guardas tú en PL/SQL Developer.</p>
+      <div class="nota">
+        <p>Si Claude escribe caracteres que no existen en Windows-1252 (flechas, emojis, símbolos como ≤), el plug-in no los carga y te dice cuáles y en qué línea, porque se perderían al guardar.</p>
+      </div>
+    </section>
+
+    <section id="bbdd">
+      <h2>Bases de datos</h2>
+      <p>Claude consulta la base de datos con un envoltorio del plug-in, y solo puede lanzar <b>una consulta</b> (<code>SELECT</code>, <code>WITH</code> o <code>DESCRIBE</code>) cada vez. Todo lo demás (<code>INSERT</code>, <code>UPDATE</code>, <code>DDL</code>, bloques PL/SQL, <code>sqlplus</code> por su cuenta…) lo bloquea un control del plug-in, y Claude te explicará qué habría que ejecutar para que lo hagas tú.</p>
+      <ul>
+        <li><b>Desarrollo</b> está siempre disponible, en todos los proyectos (botón <b>Fijar como BD de desarrollo</b>).</li>
+        <li><b>Las de un cliente</b> (pruebas, o producción para comparar) se conectan con <b>Conectar a BBDD</b> y valen para todos los expedientes de ese cliente.</li>
+        <li>Encima del cuadro de escritura de Claude ves en todo momento a qué bases está conectado; las de producción, en rojo.</li>
+      </ul>
+      <div class="nota aviso">
+        <p>Las contraseñas se guardan en tu perfil de Windows (<code>%APPDATA%\ClaudeCodePlsql\bbdd</code>), nunca en la carpeta del expediente, y Claude no puede leerlas. Aun así, conecta producción solo cuando lo necesites y desconéctala después.</p>
+      </div>
+    </section>
+
+    <section id="panel">
+      <h2>Panel de sesiones</h2>
+      <p>El botón <b>Panel de sesiones</b> abre una ventana con todas las sesiones de Claude que has abierto, cada una con un piloto de color:</p>
+      <ul class="pilotos">
+        <li style="--c: var(--trabajando)"><b>Trabajando</b>: Claude está pensando o usando una herramienta.</li>
+        <li style="--c: var(--permiso)"><b>Pide permiso</b>: espera a que apruebes algo (parpadea). Contesta en su terminal con las flechas e <kbd>Intro</kbd>.</li>
+        <li style="--c: var(--espera)"><b>Te espera</b>: ha terminado y espera tu mensaje.</li>
+        <li style="--c: var(--reposo)"><b>En reposo</b> o <b>Cerrada</b>: no está haciendo nada, o su terminal ya se cerró.</li>
+      </ul>
+      <h3>Qué puedes hacer</h3>
+      <ul>
+        <li><b>Ver y usar cualquier sesión</b>: su terminal sale en grande y puedes escribir en ella, o en la caja de abajo (<kbd>Intro</kbd> envía, <kbd>Mayús</kbd>+<kbd>Intro</kbd> salta de línea).</li>
+        <li><b>Todas</b>: todas las terminales a la vez, en pequeño. Pulsa una para ir a ella.</li>
+        <li><b>Actividad</b>: tus mensajes, las herramientas que usa Claude, los permisos que pide y el principio de cada respuesta.</li>
+        <li><b>Nueva sesión</b>: abre Claude en un expediente directamente desde el panel, sin ventana de terminal. Necesita PL/SQL Developer abierto, porque la sesión se abre con sus mismas normas y bases de datos.</li>
+        <li><b>Interrumpir</b> (tecla <kbd>Esc</kbd>) y <b>Cerrar sesión</b>. Al cerrarla, la conversación se guarda y se retoma la próxima vez.</li>
+        <li><b>Avisos</b>: activa el enlace de abajo a la izquierda y el navegador te avisará cuando una sesión pida permiso o termine.</li>
+        <li><b>Con el teclado</b>: dentro de la terminal, <kbd>Tab</kbd> y <kbd>Mayús</kbd>+<kbd>Tab</kbd> son de Claude. Para salir de ella, <kbd>F6</kbd> (a la lista de sesiones) o <kbd>Mayús</kbd>+<kbd>F6</kbd> (a los botones de arriba).</li>
+      </ul>
+      <h3>Personalizar</h3>
+      <ul>
+        <li><b>Plegar</b> la lista o la actividad con su flecha, o las dos a la vez con <b>Ampliar</b>, para que la terminal ocupe todo.</li>
+        <li>Con <b>Personalizar</b> eliges dónde va la lista (izquierda, arriba o derecha) y la actividad (derecha, debajo o izquierda), el tema y los colores, el tamaño de letra y si quieres la caja para escribir. Se guarda en tu equipo.</li>
+        <li><b>Ventanas de Windows Terminal</b>: si eliges <b>Ocultar</b>, las sesiones que abras desde PL/SQL Developer ya no abren ventana: solo se ven en el panel, que se abre solo en esa sesión.</li>
+      </ul>
+      <p>El panel necesita <b>Node.js</b> (se instala con <code>winget install OpenJS.NodeJS.LTS</code>). Sin él, Claude se abre como siempre, en su ventana. El panel solo funciona dentro de tu equipo (<code>127.0.0.1</code>) y usa tu sesión de Claude Code tal cual.</p>
+    </section>
+
+    <section id="configuracion">
+      <h2>Configuración</h2>
+      <p>El botón <b>Configurar</b> abre <code>%APPDATA%\ClaudeCodePlsql\ClaudeCode.ini</code>. Los cambios se aplican en la siguiente acción, sin reiniciar. Lo más útil:</p>
+      <table>
+        <thead><tr><th scope="col">Clave</th><th scope="col">Para qué</th></tr></thead>
+        <tbody>
+          <tr><td><code>CarpetaTrabajo</code></td><td>La carpeta general, para las ventanas que no son de ningún expediente.</td></tr>
+          <tr><td><code>RetomarConversacion</code></td><td><code>si</code>: Claude retoma la conversación anterior de esa carpeta; <code>no</code>: empieza una nueva cada vez.</td></tr>
+          <tr><td><code>PanelLateral</code> y <code>AnchoPanel</code></td><td>Una sola ventana de Claude por carpeta, colocada a la derecha, y su ancho en % de la pantalla.</td></tr>
+          <tr><td><code>Sincronizar</code></td><td><code>preguntar</code> antes de cargar los cambios de Claude, <code>automatico</code> o <code>no</code>.</td></tr>
+          <tr><td><code>ArgumentosExtra</code></td><td>Opciones para Claude, por ejemplo <code>--model opus</code>.</td></tr>
+          <tr><td><code>PanelSesiones</code></td><td><code>auto</code>: usa el panel si está Node.js; <code>no</code>: sin panel.</td></tr>
+          <tr><td><code>ComandoClaude</code>, <code>RutaNode</code></td><td>Rutas a <code>claude.exe</code> y <code>node.exe</code> si no están en el PATH.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="problemas">
+      <h2>Si algo no funciona</h2>
+      <dl class="problemas">
+        <dt>No aparece la pestaña Claude Code</dt>
+        <dd>Reinicia PL/SQL Developer. Si sigue sin salir, pon <code>EstiloMenu=clasico</code> en la configuración: las opciones irán a <b>Tools &gt; Claude Code</b>.</dd>
+        <dt>No se abre Claude</dt>
+        <dd>Comprueba que Claude Code está instalado (en una terminal, <code>claude --version</code>). Si está en otra ruta, ponla en <code>ComandoClaude</code>.</dd>
+        <dt>Claude dice que no puede consultar la base de datos</dt>
+        <dd>Pulsa <b>Fijar como BD de desarrollo</b> con una ventana conectada a desarrollo. Hace falta el cliente de Oracle (<code>sqlplus</code>).</dd>
+        <dt>El panel de sesiones no se abre</dt>
+        <dd>Falta Node.js o algo del panel. El motivo está en <code>%APPDATA%\ClaudeCodePlsql\plugin.log</code>; mientras tanto, Claude se abre en su ventana como siempre.</dd>
+        <dt>Mayús+Intro envía el mensaje en la terminal</dt>
+        <dd>Para saltar de línea en la ventana de la terminal, escribe <kbd>\</kbd> y luego <kbd>Intro</kbd>, o usa la caja de escribir del panel.</dd>
+        <dt>Cualquier otro error</dt>
+        <dd>El detalle queda en <code>%APPDATA%\ClaudeCodePlsql\plugin.log</code>. Pásaselo a quien mantiene el plug-in.</dd>
+      </dl>
+    </section>
+  </main>
+</div>
+</body>
+</html>

@@ -1,33 +1,50 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-tema="pizarra">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#1a2130">
   <title>Sesiones de Claude</title>
   <link rel="icon" href="/icono.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/vendor/xterm.css">
   <link rel="stylesheet" href="/app.css">
+  <!-- Aplica la disposición y los colores guardados antes de pintar, para que no parpadee -->
+  <script src="/prefs-inicio.js"></script>
 </head>
 <body>
+  <a class="saltar" href="#marco">Ir a la terminal</a>
+  <a class="saltar" href="#lista">Ir a la lista de sesiones</a>
+
   <div class="app" id="app" data-vista="terminal">
-    <aside class="lateral" aria-label="Sesiones">
+    <aside class="lateral" id="lateral" aria-label="Sesiones">
       <header class="lateral-cabecera">
-        <h1>Sesiones de Claude</h1>
-        <p class="resumen-estado" id="resumen-estado">Conectando…</p>
+        <div class="lateral-titulo">
+          <h1>Sesiones de Claude</h1>
+          <p class="resumen-estado" id="resumen-estado">Conectando…</p>
+        </div>
+        <button type="button" class="icono" id="btn-plegar-lista" aria-expanded="true" aria-controls="lateral" title="Plegar la lista de sesiones">
+          <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M12.5 5 7.5 10l5 5"/></svg>
+          <span class="oculto">Plegar la lista de sesiones</span>
+        </button>
       </header>
-      <nav>
+      <button type="button" class="nueva" id="btn-nueva" aria-label="Nueva sesión">
+        <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></svg>
+        <span>Nueva sesión</span>
+      </button>
+      <nav class="lista-nav" aria-label="Lista de sesiones">
         <ul class="lista" id="lista"></ul>
       </nav>
       <div class="vacio" id="vacio" hidden>
         <p>No hay ninguna sesión abierta.</p>
-        <p>Abre una desde PL/SQL Developer con <b>Abrir en Claude Code</b> y aparecerá aquí.</p>
+        <p>Abre una con <b>Nueva sesión</b> o desde PL/SQL Developer con <b>Abrir en Claude Code</b>.</p>
       </div>
       <footer class="lateral-pie">
         <button type="button" class="enlace" id="avisos">Avisarme cuando una sesión me necesite</button>
       </footer>
     </aside>
 
-    <main class="principal">
+    <main class="principal" id="principal">
       <header class="barra">
         <div class="barra-titulo" id="barra-titulo">
           <span class="numero" id="titulo-numero"></span>
@@ -40,40 +57,194 @@
             <button type="button" data-vista="mosaico" aria-pressed="false">Todas</button>
           </div>
           <button type="button" id="btn-esc" title="Manda la tecla Esc: interrumpe lo que esté haciendo Claude">Interrumpir</button>
-          <button type="button" id="btn-actividad" aria-pressed="true" title="Mostrar u ocultar la actividad">Actividad</button>
           <button type="button" id="btn-cerrar" class="peligro" title="Cierra la terminal de esta sesión">Cerrar sesión</button>
           <button type="button" id="btn-olvidar" hidden>Quitar de la lista</button>
+          <span class="separador" aria-hidden="true"></span>
+          <button type="button" class="icono" id="btn-ampliar" aria-pressed="false" title="Ampliar la terminal (pliega la lista y la actividad)">
+            <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M4 8V4h4M16 8V4h-4M4 12v4h4M16 12v4h-4"/></svg>
+            <span class="oculto">Ampliar la terminal</span>
+          </button>
+          <button type="button" class="icono" id="btn-ajustes" title="Personalizar el panel: disposición, colores y ventanas">
+            <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M3 5.5h7.8M14.2 5.5H17M3 10h2.8M9.2 10H17M3 14.5h9.8M16.2 14.5h.8"/><circle cx="12.5" cy="5.5" r="1.7"/><circle cx="7.5" cy="10" r="1.7"/><circle cx="14.5" cy="14.5" r="1.7"/></svg>
+            <span class="oculto">Personalizar</span>
+          </button>
+          <button type="button" class="icono" id="btn-ayuda" title="Ayuda del panel">
+            <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M7.8 7.7a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .8-1 1.5v.4"/><path d="M10 14.4v.1"/></svg>
+            <span class="oculto">Ayuda</span>
+          </button>
         </div>
       </header>
 
-      <section class="vista-terminal" aria-label="Terminal de la sesión">
-        <div class="terminal-y-escritura">
-          <div class="aviso-sesion" id="aviso-sesion" hidden></div>
-          <div class="marco" id="marco">
+      <div class="cuerpo" id="cuerpo">
+        <section class="vista-terminal" aria-label="Terminal de la sesión">
+          <div class="aviso-sesion" id="aviso-sesion" role="status" hidden></div>
+          <div class="marco" id="marco" tabindex="-1">
             <div class="terminal" id="terminal"></div>
           </div>
           <form class="escritura" id="escritura" autocomplete="off">
             <label for="mensaje" class="oculto">Mensaje para Claude</label>
-            <textarea id="mensaje" rows="1" placeholder="Escribe a Claude en esta sesión (Intro envía, Mayús+Intro salta de línea)"></textarea>
+            <textarea id="mensaje" name="mensaje" rows="1" autocomplete="off" placeholder="Escribe a Claude en esta sesión…" aria-describedby="mensaje-ayuda"></textarea>
+            <span id="mensaje-ayuda" class="oculto">Intro envía; Mayús+Intro salta de línea.</span>
             <button type="submit">Enviar</button>
           </form>
-        </div>
+        </section>
+
         <aside class="actividad" id="actividad" aria-label="Actividad de la sesión">
-          <h3>Actividad</h3>
+          <header class="actividad-cabecera">
+            <h3>Actividad</h3>
+            <button type="button" class="icono" id="btn-plegar-actividad" aria-expanded="true" aria-controls="actividad" title="Plegar la actividad">
+              <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M7.5 5l5 5-5 5"/></svg>
+              <span class="oculto">Plegar la actividad</span>
+            </button>
+          </header>
           <ol class="eventos" id="eventos"></ol>
           <p class="sin-mod" id="sin-mod" hidden>Esta sesión no informa de su actividad (se abrió sin el mod del panel). Puedes verla y usarla en la terminal.</p>
         </aside>
-      </section>
 
-      <section class="vista-mosaico" aria-label="Todas las sesiones">
-        <div class="mosaico" id="mosaico"></div>
-      </section>
+        <section class="vista-mosaico" aria-label="Todas las sesiones">
+          <div class="mosaico" id="mosaico"></div>
+        </section>
+      </div>
     </main>
   </div>
 
-  <div class="desconectado" id="desconectado" hidden>
+  <div class="oculto" id="anuncios" aria-live="polite" aria-atomic="true"></div>
+
+  <div class="desconectado" id="desconectado" role="alert" hidden>
     <p>Se ha perdido la conexión con el panel. Reintentando…</p>
   </div>
+
+  <!-- Nueva sesión -->
+  <dialog id="dlg-nueva" aria-labelledby="dlg-nueva-titulo">
+    <form method="dialog" id="form-nueva">
+      <h2 id="dlg-nueva-titulo">Nueva sesión de Claude</h2>
+      <p class="nota">Se abre a través de PL/SQL Developer, con las mismas normas y bases de datos que desde la cinta, y solo se ve aquí, sin ventana de terminal. PL/SQL Developer tiene que estar abierto.</p>
+      <fieldset>
+        <legend>¿Dónde?</legend>
+        <div class="opciones-carpeta" id="opciones-carpeta"></div>
+        <label class="opcion">
+          <input type="radio" name="carpeta" value="__otra__">
+          <span>Otro expediente</span>
+        </label>
+        <label for="carpeta-otra" class="oculto">Ruta de la carpeta del expediente</label>
+        <input type="text" id="carpeta-otra" name="carpeta-otra" class="ruta" placeholder="C:\…\1234567 - Título del expediente" spellcheck="false" autocomplete="off">
+      </fieldset>
+      <p class="error" id="nueva-error" role="alert" hidden></p>
+      <div class="botones">
+        <button type="button" value="cancelar" id="nueva-cancelar">Cancelar</button>
+        <button type="submit" class="principal-btn" id="nueva-abrir">Abrir sesión</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Personalizar -->
+  <dialog id="dlg-ajustes" class="ancho" aria-labelledby="dlg-ajustes-titulo">
+    <form method="dialog" id="form-ajustes">
+      <h2 id="dlg-ajustes-titulo">Personalizar el panel</h2>
+      <p class="nota">Los cambios se ven al momento y se guardan en tu equipo.</p>
+
+      <div class="ajustes-columnas">
+        <div>
+          <fieldset>
+            <legend>Lista de sesiones</legend>
+            <div class="segmentado">
+              <label><input type="radio" name="lista" value="izquierda"><span>A la izquierda</span></label>
+              <label><input type="radio" name="lista" value="arriba"><span>Arriba</span></label>
+              <label><input type="radio" name="lista" value="derecha"><span>A la derecha</span></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Actividad</legend>
+            <div class="segmentado">
+              <label><input type="radio" name="actividad" value="derecha"><span>A la derecha</span></label>
+              <label><input type="radio" name="actividad" value="abajo"><span>Debajo</span></label>
+              <label><input type="radio" name="actividad" value="izquierda"><span>A la izquierda</span></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Terminal</legend>
+            <label class="fila">
+              <span>Tamaño de letra</span>
+              <input type="range" name="letra" min="10" max="20" step="1">
+              <output id="letra-valor"></output>
+            </label>
+            <label class="fila">
+              <input type="checkbox" name="caja">
+              <span>Caja para escribir debajo de la terminal</span>
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Ventanas de Windows Terminal</legend>
+            <label class="opcion">
+              <input type="radio" name="ventanas" value="mostrar">
+              <span>Mostrar: cada sesión abre también su ventana, a la derecha de PL/SQL Developer</span>
+            </label>
+            <label class="opcion">
+              <input type="radio" name="ventanas" value="ocultar">
+              <span>Ocultar: las sesiones solo se ven aquí, en el panel</span>
+            </label>
+            <p class="nota">Vale para las sesiones que abras a partir de ahora.</p>
+          </fieldset>
+        </div>
+
+        <div>
+          <fieldset>
+            <legend>Tema</legend>
+            <div class="temas" id="temas">
+              <label class="tema" data-muestra="pizarra"><input type="radio" name="tema" value="pizarra"><span>Pizarra</span></label>
+              <label class="tema" data-muestra="noche"><input type="radio" name="tema" value="noche"><span>Noche</span></label>
+              <label class="tema" data-muestra="claro"><input type="radio" name="tema" value="claro"><span>Claro</span></label>
+              <label class="tema" data-muestra="contraste"><input type="radio" name="tema" value="contraste"><span>Alto contraste</span></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Colores</legend>
+            <div class="colores" id="colores"></div>
+            <button type="button" class="enlace" id="colores-restablecer">Volver a los colores del tema</button>
+          </fieldset>
+        </div>
+      </div>
+
+      <div class="botones">
+        <button type="button" id="ajustes-restablecer" class="enlace">Restablecer todo</button>
+        <button type="submit" class="principal-btn">Hecho</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ayuda del panel -->
+  <dialog id="dlg-ayuda" class="medio" aria-labelledby="dlg-ayuda-titulo">
+    <form method="dialog">
+      <h2 id="dlg-ayuda-titulo">Cómo funciona el panel</h2>
+      <div class="ayuda-texto">
+        <p>Aquí están todas las sesiones de Claude que abres desde PL/SQL Developer (o con <b>Nueva sesión</b>). Lo que escribes aquí llega a la sesión igual que si lo tecleases en su ventana.</p>
+        <h3>Los pilotos</h3>
+        <ul class="leyenda">
+          <li data-estado="trabajando"><b>Trabajando</b>: Claude está pensando o usando una herramienta.</li>
+          <li data-estado="permiso"><b>Pide permiso</b>: está esperando a que apruebes algo. Contesta en la terminal (flechas e Intro).</li>
+          <li data-estado="esperando"><b>Te espera</b>: ha terminado y espera tu mensaje.</li>
+          <li data-estado="reposo"><b>En reposo</b> o <b>Activa</b>: la sesión no informa de lo que hace; mira su terminal.</li>
+          <li data-estado="cerrada"><b>Cerrada</b>: se cerró su terminal; ves cómo quedó.</li>
+        </ul>
+        <h3>Botones</h3>
+        <ul>
+          <li><b>Nueva sesión</b>: abre Claude en un expediente sin pasar por una ventana del IDE (PL/SQL Developer tiene que estar abierto).</li>
+          <li><b>Terminal / Todas</b>: una sesión en grande, o todas a la vez en pequeño. Pulsa una para ir a ella.</li>
+          <li><b>Interrumpir</b>: manda Esc a la sesión (para lo que esté haciendo Claude).</li>
+          <li><b>Cerrar sesión</b>: cierra su terminal. La conversación se guarda y se retoma al volver a abrirla.</li>
+          <li><b>Ampliar</b>: pliega la lista y la actividad para que la terminal ocupe todo. Cada columna se pliega también con su flecha.</li>
+          <li><b>Personalizar</b>: dónde va la lista y la actividad, colores, tamaño de letra y si las sesiones abren ventana de terminal.</li>
+        </ul>
+        <h3>Escribir</h3>
+        <p>Haz clic en la terminal y escribe, o usa la caja de abajo: Intro envía y Mayús+Intro salta de línea. Para aprobar un permiso, usa las flechas e Intro en la terminal.</p>
+        <p>Con el teclado: dentro de la terminal, Tab y Mayús+Tab son de Claude. Para salir de ella pulsa <kbd>F6</kbd> (vas a la lista de sesiones) o <kbd>Mayús</kbd>+<kbd>F6</kbd> (a los botones de arriba).</p>
+        <p><a href="/ayuda" target="_blank" rel="noopener">Ayuda completa del plug-in</a> (todos los botones de PL/SQL Developer).</p>
+      </div>
+      <div class="botones">
+        <button type="submit" class="principal-btn">Entendido</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/vendor/xterm.js"></script>
   <script src="/vendor/addon-unicode11.js"></script>

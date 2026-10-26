@@ -35,6 +35,7 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
 | **Documentación** | En un expediente: A18 y manual de desarrollo con sus skills. |
 | **Preparar instalación** | En un expediente: lista y orden de compilación de los fuentes y el script de instalación. |
 | **Panel de sesiones** | Abre el panel con todas las sesiones de Claude abiertas desde el plug-in, en directo (ver *Panel de sesiones*). |
+| **Ayuda** | Abre la guía de uso (`ayuda/ayuda.html`, incrustada en la DLL): qué hace cada botón, expedientes, BBDD, panel y problemas frecuentes. Se abre sola la primera vez tras instalar o actualizar a una versión con ayuda nueva. |
 
 ### Cómo funciona
 
@@ -70,8 +71,19 @@ de Claude que has abierto desde el plug-in**:
 - **La actividad**: tus mensajes, las herramientas que ha usado, los permisos que ha pedido y el principio de cada
   respuesta.
 - **Todas**: las terminales de todas las sesiones a la vez, en pequeño. Pulsa una para ir a ella.
+- **Nueva sesión**: abre Claude en un expediente directamente desde el panel, sin ventana de terminal. El panel deja una
+  petición en `%APPDATA%\ClaudeCodePlsql\peticiones` y el plug-in la atiende con las mismas normas y BBDD que la cinta,
+  así que PL/SQL Developer tiene que estar abierto.
+- **Plegar** la lista y la actividad (cada una con su flecha, o las dos con *Ampliar*) para que la terminal ocupe todo.
+- **Personalizar**: la lista a la izquierda, arriba o a la derecha; la actividad a la derecha, debajo o a la izquierda;
+  tema (Pizarra, Noche, Claro, Alto contraste) y colores propios; tamaño de letra; caja de escribir; y **Ventanas de
+  Windows Terminal: mostrar u ocultar**. Con *ocultar*, las sesiones que abre el plug-in no abren ventana: corren en
+  segundo plano, se ven y se usan en el panel (que se abre solo en la sesión) y toman el tamaño del panel. Todo se
+  guarda en `%APPDATA%\ClaudeCodePlsql\panel\preferencias.json`, que el plug-in lee al abrir cada sesión.
+- **Una sesión por carpeta, también en el panel**: si ya hay una abierta, el plug-in le deja escrito el mensaje (sin
+  enviarlo) y te la enseña en el panel.
 - **Avisos** del navegador cuando una sesión pide permiso o termina y no la estás mirando (actívalos con el enlace de
-  abajo a la izquierda).
+  abajo a la izquierda). Con el teclado, <kbd>F6</kbd> saca el foco de la terminal (Tab es de Claude).
 
 En la ventana de Windows Terminal no cambia nada: la sesión se ve y se usa igual, y lo que escribas en un sitio aparece
 en el otro. Se usa tu sesión de Claude Code tal cual (tu cuenta, también Enterprise): el panel no habla con Anthropic
@@ -94,8 +106,8 @@ quien se sienta en tu teclado.
 
 **Límites.**
 - Solo aparecen las sesiones abiertas desde el plug-in; un `claude` lanzado a mano no.
-- La sesión vive en su ventana: si cierras la ventana de Windows Terminal, la sesión termina (en el panel queda como
-  *cerrada*, con su última pantalla).
+- Con ventana, la sesión vive en ella: si cierras la ventana de Windows Terminal, la sesión termina (en el panel queda
+  como *cerrada*, con su última pantalla). Sin ventana, se cierra con *Cerrar sesión* en el panel.
 - En la ventana de la terminal, Mayús+Intro llega como Intro: para saltar de línea usa `\` + Intro.
 - El tamaño de la terminal lo manda la ventana de Windows Terminal; el panel ajusta la letra para que quepa.
 
@@ -288,7 +300,9 @@ src/Config.cs      lectura de ClaudeCode.ini
 src/Workspace.cs   carpeta de trabajo (expediente o general), textos para Claude y comprobación de Windows-1252
 src/Templates.cs   ClaudeCode.ini, los CLAUDE.md y el JSON de SQLcl
 src/Win32.cs       MessageBox, temporizador y portapapeles
-src/Panel.cs       panel de sesiones: busca Node.js y el panel, abre las sesiones con el anfitrión
+src/Panel.cs       panel de sesiones: busca Node.js y el panel, abre las sesiones con el anfitrión (con o sin ventana)
+src/Help.cs        botón Ayuda: deja ayuda.html en %APPDATA% y la abre en Edge
+ayuda/ayuda.html   la guía de uso (va dentro de la DLL y, en la publicación, también en el panel: /ayuda)
 panel/servidor.js  servidor del panel (127.0.0.1): sesiones, navegadores y avisos del mod
 panel/anfitrion.js envuelve cada sesión en una pseudoterminal y la comparte con el servidor
 panel/abrir.js     abre el panel en el navegador con un enlace de un solo uso (botón Panel de sesiones)
