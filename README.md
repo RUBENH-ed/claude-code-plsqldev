@@ -168,6 +168,15 @@ la última versión publicada, deja preparada la DLL nueva (se aplica al reinici
 día las skills que elegiste. Para cambiar lo elegido, vuelve a ejecutar `instalar.ps1`. El resultado de la última
 actualización queda en `%APPDATA%\ClaudeCodePlsql\actualizacion.json`.
 
+**Versión de pruebas.** Cada rama `pruebas/...` que se sube a GitHub, cuando compila y pasa las pruebas, se publica
+en la rama `publicado-pruebas` (no le llega a nadie). Para instalarla y seguir actualizándose con ella:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:APPDATA\ClaudeCodePlsql\repo\instalar.ps1" -Pruebas
+```
+
+Con `-Estable` se vuelve a la versión de todos. Queda en `Rama` de `ClaudeCode.ini`.
+
 **Ventana de novedades.** Cuando una actualización trae algo nuevo en `CAMBIOS.md`, se abre una ventana con esas
 novedades (y las versiones anteriores, plegadas). Queda en `%APPDATA%\ClaudeCodePlsql\novedades.html`.
 `MostrarNovedades=no` en `ClaudeCode.ini` la quita.

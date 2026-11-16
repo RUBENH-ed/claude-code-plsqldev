@@ -27,6 +27,8 @@
 - **Git con los certificados de Windows**, para que funcione con el cortafuegos de la empresa, que revisa el HTTPS.
   El instalador comprueba antes de nada que Git llega a GitHub y, si no, explica si parece el certificado, el permiso
   o la red. Si no está la copia de Git (por ejemplo, ejecutado desde el ZIP de la rama `publicado`), la hace él.
+- **Versión de pruebas**: las ramas `pruebas/...` se publican en `publicado-pruebas`, y `instalar.ps1 -Pruebas` la
+  instala y se actualiza con ella (`-Estable` vuelve a la de todos).
 - **Ventana de novedades** al actualizar, con lo nuevo de este fichero (`MostrarNovedades=no` la quita).
 - Los cuadros nuevos (listas, títulos, selector de carpetas) son un `dialogo.ps1` con Windows Forms que el plug-in deja
   en `%APPDATA%\ClaudeCodePlsql`. Los expedientes y temas recientes, en `recientes.txt`.

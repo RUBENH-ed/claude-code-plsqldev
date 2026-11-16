@@ -1,12 +1,12 @@
 # Compila la DLL en GitHub (no hace falta instalar nada en tu equipo).
 # Sube el proyecto a un repositorio, ve a Actions > build > Run workflow y descarga el artefacto.
 # Con cada cambio en main, además, publica la versión en la rama "publicado", de donde la bajan el instalador y la
-# actualización automática de cada equipo.
+# actualización automática de cada equipo. Las ramas pruebas/... se publican en "publicado-pruebas", que solo
+# usan los equipos instalados con instalar.ps1 -Pruebas.
 name: build
 
 on:
   push:
-    # Las ramas pruebas/... se compilan y se prueban, pero no se publican (publicar solo corre en main)
     branches: [main, 'pruebas/**']
   workflow_dispatch:
 
@@ -49,10 +49,14 @@ jobs:
   # la documentación. Se rehace entera en cada versión (las copias de los equipos la bajan con fetch + reset).
   publicar:
     needs: [build, panel]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/pruebas/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # main -> publicado (todos); pruebas/... -> publicado-pruebas (solo quien instala con -Pruebas)
+      DESTINO: ${{ github.ref == 'refs/heads/main' && 'publicado' || 'publicado-pruebas' }}
+      SUFIJO: ${{ github.ref == 'refs/heads/main' && '' || format(' pruebas {0}', github.ref_name) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,17 +81,17 @@ jobs:
           rm -rf pruebas
           echo "$(git rev-parse HEAD:panel)$(git rev-parse HEAD:ayuda)" | sha1sum | cut -c1-12 > VERSION
 
-      - name: Publicar en la rama publicado
+      - name: Publicar en la rama publicado (o publicado-pruebas)
         run: |
           mkdir pub
           cp dist/ClaudeCodePlsql.dll instalar.ps1 actualizar.ps1 README.md CAMBIOS.md pub/
           cp -r paquete panel pub/
           printf '* -text\n' > pub/.gitattributes
-          echo "${GITHUB_SHA::7} $(date -u +%Y-%m-%dT%H:%MZ)" > pub/VERSION
+          echo "${GITHUB_SHA::7} $(date -u +%Y-%m-%dT%H:%MZ)${SUFIJO}" > pub/VERSION
           cd pub
-          git init -q -b publicado
+          git init -q -b "$DESTINO"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -q -m "Versión ${GITHUB_SHA::7}"
-          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" publicado
+          git commit -q -m "Versión ${GITHUB_SHA::7}${SUFIJO}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$DESTINO"

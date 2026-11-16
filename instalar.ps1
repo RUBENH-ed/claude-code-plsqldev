@@ -8,9 +8,13 @@
 # pregunta que quieres instalar, deja la DLL en la carpeta de plug-ins de PL/SQL Developer y activa la actualizacion
 # automatica. Se puede volver a ejecutar para cambiar lo elegido.
 #
+# -Pruebas instala (y a partir de ahi actualiza) la version de pruebas: la que publican las ramas pruebas/... en la
+# rama publicado-pruebas, antes de llevarla a main. -Estable vuelve a la version de todos. Sin ninguno de los dos se
+# sigue con la que hubiera.
+#
 # Quien mantiene las skills del paquete (las tiene originales en su cuenta de claude.ai) lo ejecuta una vez con
 # -Publicar para que, al arrancar PL/SQL Developer, sus cambios se publiquen para los demas.
-param([switch]$Publicar)
+param([switch]$Publicar, [switch]$Pruebas, [switch]$Estable)
 
 $ErrorActionPreference = 'Stop'
 $dirPlugin = Join-Path $env:APPDATA 'ClaudeCodePlsql'
@@ -48,6 +52,8 @@ function GitW([string[]]$a) {
 }
 Write-Host 'Claude Code para PL/SQL Developer: instalacion' -ForegroundColor White
 $urlRepo = 'https://github.com/RUBENH-ed/claude-code-plsqldev.git'
+$rama = if ($Pruebas) { 'publicado-pruebas' } elseif ($Estable) { 'publicado' } else { Ajuste 'Rama' 'publicado' }
+if ($rama -eq 'publicado-pruebas') { Write-Host 'Version de PRUEBAS (rama publicado-pruebas). Para volver a la de todos: instalar.ps1 -Estable' -ForegroundColor Yellow }
 
 # ============================================================================== 1. requisitos y conflictos
 Titulo '1. Comprobaciones (no se toca nada todavia)'
@@ -62,8 +68,9 @@ if ($git) {
     }
     # Que llega a GitHub y puede leer el repositorio; si no, lo mas probable segun lo que conteste
     Write-Host '  Compruebo que llego a GitHub (la primera vez se puede abrir el navegador para iniciar sesion)...'
-    $p = GitW @('ls-remote', '--heads', $urlRepo, 'publicado')
-    if ($p.ok -and $p.salida -match 'publicado') { Bien "GitHub: $urlRepo" }
+    $p = GitW @('ls-remote', '--heads', $urlRepo, $rama)
+    if ($p.ok -and $p.salida -match "refs/heads/$rama\b") { Bien "GitHub: $urlRepo ($rama)" }
+    elseif ($p.ok) { Mal "En GitHub no esta la rama $rama$(if ($rama -eq 'publicado-pruebas') { ': todavia no se ha publicado ninguna version de pruebas (sube una rama pruebas/... y espera a que acabe su compilacion)' })."; $bloqueos++ }
     else {
         Mal "Git no llega a GitHub: $($p.salida)"; $bloqueos++
         if ($p.salida -match 'certificate|certificado|SSL|schannel') {
@@ -190,7 +197,7 @@ New-Item -ItemType Directory -Force -Path $dirPlugin | Out-Null
 $lineas = New-Object 'System.Collections.Generic.List[string]'
 if (Test-Path $ini) { $lineas.AddRange([System.IO.File]::ReadAllLines($ini, $utf8)) }
 $nuevos = [ordered]@{ DllInstalada = $dll; Skills = ($elegidas -join ','); TareaProgramada = $tarea; ActualizacionesAutomaticas = $recibir; PublicarSkills = $publicarSkills
-                      MostrarNovedades = (Ajuste 'MostrarNovedades' 'si') }
+                      MostrarNovedades = (Ajuste 'MostrarNovedades' 'si'); Rama = $rama }
 foreach ($k in $nuevos.Keys) {
     $i = -1; for ($j = 0; $j -lt $lineas.Count; $j++) { if ($lineas[$j] -match "^\s*$k\s*=") { $i = $j; break } }
     if ($i -ge 0) { $lineas[$i] = "$k=$($nuevos[$k])" }
@@ -200,7 +207,8 @@ foreach ($k in $nuevos.Keys) {
             $lineas.Add(''); $lineas.Add('[Actualizaciones]')
             $lineas.Add('; Los escribe instalar.ps1 (vuelve a ejecutarlo para cambiarlos). ActualizacionesAutomaticas=no deja la version')
             $lineas.Add('; instalada. PublicarSkills=si solo en el equipo de quien mantiene las skills (instalar.ps1 -Publicar).')
-            $lineas.Add('; MostrarNovedades=no quita la ventana de novedades al actualizar.')
+            $lineas.Add('; MostrarNovedades=no quita la ventana de novedades al actualizar. Rama=publicado-pruebas sigue la version')
+            $lineas.Add('; de pruebas (instalar.ps1 -Pruebas; -Estable vuelve a publicado).')
             $s = $lineas.Count - 1
         }
         # Al final de la seccion (antes de la siguiente y de las lineas en blanco que la separan)
@@ -219,12 +227,19 @@ Bien "Ajustes guardados en $ini"
 if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) {
     $tmp = "$repo.nuevo"
     if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
-    $c = GitW @('clone', '-q', '--depth', '1', '--branch', 'publicado', $urlRepo, $tmp)
+    $c = GitW @('clone', '-q', '--depth', '1', '--branch', $rama, $urlRepo, $tmp)
     if (-not $c.ok) { Mal "No he podido bajar la version de GitHub: $($c.salida)"; exit 1 }
     if (Test-Path -LiteralPath $repo) { Remove-Item -LiteralPath $repo -Recurse -Force }
     Rename-Item -LiteralPath $tmp -NewName (Split-Path $repo -Leaf)
 }
-Bien "Copia de GitHub en $repo"
+else {
+    # Ya estaba: se pone en la version de la rama elegida aqui mismo, porque el actualizar.ps1 que hay en la copia
+    # puede ser de una version anterior que no sabe elegir rama
+    $f = GitW @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', $rama)
+    if ($f.ok) { $f = GitW @('-C', $repo, 'reset', '-q', '--hard', 'FETCH_HEAD') }
+    if (-not $f.ok) { Mal "No he podido bajar la version de GitHub: $($f.salida)"; exit 1 }
+}
+Bien "Copia de GitHub ($rama) en $repo"
 
 $r = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repo 'actualizar.ps1') -Instalando 2>&1
 $estado = Get-Content (Join-Path $dirPlugin 'actualizacion.json') -Raw -Encoding UTF8 | ConvertFrom-Json

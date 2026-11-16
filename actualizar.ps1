@@ -2,7 +2,8 @@
 # La lanza el plug-in en segundo plano al arrancar PL/SQL Developer (y el instalador, la primera vez).
 #
 #   1. Baja la ultima version publicada (rama "publicado" del repositorio, en %APPDATA%\ClaudeCodePlsql\repo), con Git
-#      usando los certificados de Windows (ver Git).
+#      usando los certificados de Windows (ver Git). Con Rama=publicado-pruebas (instalar.ps1 -Pruebas), la version
+#      de pruebas que publican las ramas pruebas/...
 #   2. Si la DLL ha cambiado, la deja en su sitio: la que esta cargada se renombra a .old (Windows lo permite) y la
 #      nueva se aplica al reiniciar PL/SQL Developer.
 #   2b. Deja el panel de sesiones en %APPDATA%\ClaudeCodePlsql\panel-app\<version> (y actual.txt apuntando a el).
@@ -84,8 +85,10 @@ try {
     $recibir = $Instalando -or ((Ajuste 'ActualizacionesAutomaticas' 'si') -notmatch '^(no|n|false|0)$')
     if ($recibir) {
     # ------------------------------------------------------------------------ 1. ultima version publicada
-    Git @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', 'publicado') | Out-Null
-    Git @('-C', $repo, 'reset', '-q', '--hard', 'origin/publicado') | Out-Null
+    # FETCH_HEAD y no origin/<rama>: la copia se clono solo con una rama y la otra no tiene referencia remota
+    $rama = Ajuste 'Rama' 'publicado'
+    Git @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', $rama) | Out-Null
+    Git @('-C', $repo, 'reset', '-q', '--hard', 'FETCH_HEAD') | Out-Null
     if (Test-Path -LiteralPath $fVersion) { $estado.version = (Leer $fVersion).Trim() }
 
     # ------------------------------------------------------------------------ 2. la DLL
