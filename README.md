@@ -143,28 +143,20 @@ artefacto `ClaudeCodePlsql-x64` (o `-x86`).
 
 ## Instalar (con actualización automática)
 
-Lo normal en la organización. El instalador (`instalar.ps1`) se ejecuta desde cualquier copia de la versión
-publicada, y pregunta de dónde se bajarán las versiones nuevas:
+Lo normal en la organización. Hace falta acceso al repositorio en GitHub y Git instalado
+(`winget install --id Git.Git -e`).
 
-| Origen | Qué hace falta | Cuándo |
-|---|---|---|
-| **Carpeta compartida** de la empresa (de red, SharePoint u OneDrive) | Nada más: ni Git ni salir a Internet | Si el cortafuegos o el antivirus de la empresa no deja usar Git con GitHub |
-| **GitHub, con Git** | Git (`winget install --id Git.Git -e`) y acceso al repositorio | Si Git llega a GitHub |
-| **Ninguno** | — | Para cambiar de versión, se vuelve a ejecutar un instalador nuevo |
-
-1. Ejecuta el instalador de una de estas copias:
+1. Baja la versión publicada (la primera vez te pedirá iniciar sesión en GitHub en el navegador) y ejecuta el
+   instalador:
 
    ```powershell
-   # Desde la carpeta compartida (la ruta que te den)
-   powershell -NoProfile -ExecutionPolicy Bypass -File "\\servidor\ruta\ClaudeCodePlsql\instalar.ps1"
+   git clone --branch publicado <url del repositorio> "$env:APPDATA\ClaudeCodePlsql\repo"
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$env:APPDATA\ClaudeCodePlsql\repo\instalar.ps1"
    ```
 
-   - O baja con el navegador el ZIP de la rama `publicado` en GitHub (*Code > Download ZIP*), descomprímelo y
-     ejecuta su `instalar.ps1` igual.
-   - O con Git: `git clone --branch publicado <url del repositorio> "$env:APPDATA\ClaudeCodePlsql\repo"` y su
-     `instalar.ps1` (la primera vez pide iniciar sesión en GitHub en el navegador).
-
-2. Contesta a sus preguntas. Antes de tocar nada revisa lo que hace falta y los conflictos: Git, Claude Code, el cliente de Oracle, la carpeta
+   También se puede ejecutar el `instalar.ps1` del ZIP de la rama `publicado` (*Code > Download ZIP*): hace él la
+   copia de Git.
+2. Contesta a sus preguntas. Antes de tocar nada revisa lo que hace falta y los conflictos: Git (y que llega a GitHub), Claude Code, el cliente de Oracle, la carpeta
    de plug-ins de PL/SQL Developer (y si se puede escribir en ella), versiones anteriores del plug-in, skills tuyas
    con el mismo nombre que las del paquete (las tuyas no se pisan si no quieres) y ajustes de Claude Code que
    desactiven los hooks. Después pregunta qué skills quieres (ver *Paquete de expedientes*) y deja la DLL en su sitio.
@@ -184,18 +176,7 @@ novedades (y las versiones anteriores, plegadas). Queda en `%APPDATA%\ClaudeCode
 Windows conoce pero la lista propia de Git no. Por eso `instalar.ps1` y `actualizar.ps1` usan Git siempre con los
 certificados de Windows (`http.sslBackend=schannel`). Si Windows no puede comprobar si el certificado está revocado,
 lo reintentan sin esa comprobación. Si aun así no llega a GitHub, el instalador dice si parece el certificado, el
-permiso o la red, y se puede elegir la carpeta compartida.
-
-**La carpeta compartida** la mantiene el equipo de quien mantiene el plug-in. Ejecuta una vez el instalador, con
-Git y con `-Espejo`:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:APPDATA\ClaudeCodePlsql\repo\instalar.ps1" -Espejo "\\servidor\ruta\ClaudeCodePlsql"
-```
-
-A partir de ahí, cada vez que su PL/SQL Developer baja una versión nueva de GitHub, la deja en esa carpeta
-(`EspejoPublicado`). Copia solo lo que cambia y escribe `VERSION` al final, para que nadie coja una copia a medias.
-Los equipos que se actualizan desde la carpeta la cogen al arrancar su PL/SQL Developer.
+permiso o la red, y qué pedir a sistemas.
 
 ## Paquete de expedientes (opcional)
 

@@ -1,19 +1,16 @@
 ﻿# Instalador del plug-in "Claude Code para PL/SQL Developer".
 #
-# Se ejecuta desde cualquier copia de la version publicada (no hace falta Git):
-#   - la carpeta compartida de la empresa:  powershell -NoProfile -ExecutionPolicy Bypass -File "\\...\instalar.ps1"
-#   - el ZIP de la rama publicado bajado de GitHub con el navegador, descomprimido
-#   - la copia de Git:  git clone --branch publicado <url> "%APPDATA%\ClaudeCodePlsql\repo" y su instalar.ps1
+# Hace falta Git y acceso al repositorio de GitHub. Se ejecuta desde cualquier copia de la version publicada (la de
+# Git o el ZIP de la rama publicado); si aun no esta la copia de Git en %APPDATA%\ClaudeCodePlsql\repo, la hace el:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File "<carpeta>\instalar.ps1"
 #
-# Revisa lo que hace falta y los conflictos antes de tocar nada, pregunta que quieres instalar y de donde se bajan
-# las versiones nuevas (GitHub con Git, una carpeta compartida o ninguno), deja la DLL en la carpeta de plug-ins de
-# PL/SQL Developer y activa la actualizacion automatica. Se puede volver a ejecutar para cambiar lo elegido.
+# Revisa lo que hace falta y los conflictos antes de tocar nada (tambien que Git llega a GitHub, y si no, por que),
+# pregunta que quieres instalar, deja la DLL en la carpeta de plug-ins de PL/SQL Developer y activa la actualizacion
+# automatica. Se puede volver a ejecutar para cambiar lo elegido.
 #
 # Quien mantiene las skills del paquete (las tiene originales en su cuenta de claude.ai) lo ejecuta una vez con
 # -Publicar para que, al arrancar PL/SQL Developer, sus cambios se publiquen para los demas.
-# Quien mantiene el plug-in lo ejecuta una vez con -Espejo <carpeta compartida>: al arrancar PL/SQL Developer, su
-# equipo baja la version de GitHub y la deja en esa carpeta, de donde se actualizan los equipos sin Git.
-param([switch]$Publicar, [string]$Espejo)
+param([switch]$Publicar)
 
 $ErrorActionPreference = 'Stop'
 $dirPlugin = Join-Path $env:APPDATA 'ClaudeCodePlsql'
@@ -49,18 +46,7 @@ function GitW([string[]]$a) {
     if ($LASTEXITCODE -ne 0 -and ($salida | Out-String) -match 'revocation|revocaci|CRYPT_E_') { $salida = & $git @tls -c http.schannelCheckRevoke=false @a 2>&1 }
     return [pscustomobject]@{ ok = ($LASTEXITCODE -eq 0); salida = (($salida | Out-String).Trim()) }
 }
-function EsPublicado([string]$d) { $d -and (Test-Path -LiteralPath (Join-Path $d 'VERSION')) -and (Test-Path -LiteralPath (Join-Path $d 'actualizar.ps1')) }
-function Igual([string]$a, [string]$b) { $a -and $b -and ($a.TrimEnd('\') -ieq $b.TrimEnd('\')) }
-
 Write-Host 'Claude Code para PL/SQL Developer: instalacion' -ForegroundColor White
-# Desde donde se ejecuta: la copia de %APPDATA% (ya instalado), la carpeta compartida o un ZIP descomprimido
-$aqui = $PSScriptRoot
-if (-not (EsPublicado $aqui)) {
-    Write-Host "En $aqui no esta la version publicada completa (faltan VERSION o actualizar.ps1). Ejecuta el instalar.ps1 de la carpeta compartida, del ZIP de la rama publicado o de $repo." -ForegroundColor Red
-    exit 1
-}
-$version = ([System.IO.File]::ReadAllText((Join-Path $aqui 'VERSION'))).Trim()
-Write-Host "Version publicada: $version (desde $aqui)"
 $urlRepo = 'https://github.com/RUBENH-ed/claude-code-plsqldev.git'
 
 # ============================================================================== 1. requisitos y conflictos
@@ -69,9 +55,27 @@ $bloqueos = 0
 
 $git = (Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 if (-not $git -and (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe'))) { $git = Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe' }
-if ($git) { Bien "Git: $git" } else { Ojo 'No esta Git: las actualizaciones pueden venir de una carpeta compartida (te lo pregunto luego).' }
-if ($git -and (Test-Path -LiteralPath (Join-Path $repo '.git'))) {
-    $u = GitW @('-C', $repo, 'remote', 'get-url', 'origin'); if ($u.ok -and $u.salida) { $urlRepo = $u.salida }
+if ($git) {
+    Bien "Git: $git"
+    if (Test-Path -LiteralPath (Join-Path $repo '.git')) {
+        $u = GitW @('-C', $repo, 'remote', 'get-url', 'origin'); if ($u.ok -and $u.salida) { $urlRepo = $u.salida }
+    }
+    # Que llega a GitHub y puede leer el repositorio; si no, lo mas probable segun lo que conteste
+    Write-Host '  Compruebo que llego a GitHub (la primera vez se puede abrir el navegador para iniciar sesion)...'
+    $p = GitW @('ls-remote', '--heads', $urlRepo, 'publicado')
+    if ($p.ok -and $p.salida -match 'publicado') { Bien "GitHub: $urlRepo" }
+    else {
+        Mal "Git no llega a GitHub: $($p.salida)"; $bloqueos++
+        if ($p.salida -match 'certificate|certificado|SSL|schannel') {
+            Ojo 'Es el certificado: el cortafuegos de la empresa (FortiGate) revisa el HTTPS y Windows no confia en su certificado. Pide a sistemas que lo instalen en el equipo.'
+        } elseif ($p.salida -match 'not found|Authentication|403|denied|permission') {
+            Ojo 'Es el permiso: inicia sesion con tu usuario de GitHub de la organizacion y pide acceso al repositorio si no lo tienes. Si te sale una pagina de Fortinet, es el cortafuegos: pide a sistemas que permitan github.com.'
+        } else {
+            Ojo 'Parece la red: el cortafuegos o el proxy de la empresa corta GitHub. Pide a sistemas que permitan github.com para Git.'
+        }
+    }
+} else {
+    Mal 'Git no esta instalado: winget install --id Git.Git -e (o el instalador de git-scm.com, "solo para mi" si no eres administrador).'; $bloqueos++
 }
 
 $claude = @((Join-Path $env:USERPROFILE '.local\bin\claude.exe'), (Get-Command claude -ErrorAction SilentlyContinue).Source) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
@@ -168,57 +172,7 @@ foreach ($s in @($elegidas)) {
 }
 
 Write-Host '  Al arrancar PL/SQL Developer se pueden bajar solas las versiones nuevas del plug-in y de las skills elegidas.'
-Write-Host '  ¿De donde se bajan?'
-Write-Host "    1. GitHub, con Git$(if (-not $git) { ' (no lo tienes instalado)' })"
-Write-Host '    2. Una carpeta compartida de la empresa (de red, SharePoint u OneDrive): no hace falta Git ni salir a Internet'
-Write-Host '    3. De ningun sitio: solo la version que instalo ahora (para cambiar de version, vuelve a ejecutar un instalador nuevo)'
-$origenPrevio = Ajuste 'Origen'
-if (-not $origenPrevio -and (Test-Path (Join-Path $repo '.git'))) { $origenPrevio = 'git' }
-# Lo que se propone: lo de la vez anterior; si se ejecuta desde una carpeta compartida, esa; si no, GitHub
-$carpetaPropuesta = if ($origenPrevio -and $origenPrevio -notin 'git', 'ninguno') { $origenPrevio } elseif (-not (Igual $aqui $repo) -and ($aqui -match '^\\\\|OneDrive|SharePoint')) { $aqui } else { '' }
-$defecto = if ($origenPrevio -eq 'git') { '1' } elseif ($origenPrevio -eq 'ninguno') { '3' } elseif ($carpetaPropuesta) { '2' } elseif ($git) { '1' } else { '2' }
-$origen = $null
-while (-not $origen) {
-    $r = Read-Host "  Elige 1, 2 o 3 (Intro = $defecto)"
-    if (-not $r) { $r = $defecto }
-    switch ($r.Trim()) {
-        '1' {
-            if (-not $git) { Mal 'Sin Git no se puede: instalalo (winget install --id Git.Git -e, o el instalador de git-scm.com "solo para mi") o elige otra opcion.'; break }
-            Write-Host '  Compruebo que llego a GitHub (la primera vez se puede abrir el navegador para iniciar sesion)...'
-            $p = GitW @('ls-remote', '--heads', $urlRepo, 'publicado')
-            if ($p.ok -and $p.salida -match 'publicado') { Bien "GitHub: $urlRepo"; $origen = 'git'; break }
-            Mal "No llego a GitHub con Git: $($p.salida)"
-            if ($p.salida -match 'certificate|certificado|SSL|schannel') {
-                Ojo 'Es el certificado: el cortafuegos de la empresa (FortiGate) revisa el HTTPS y Windows no confia en su certificado. Pide a sistemas que lo instalen, o elige la carpeta compartida.'
-            } elseif ($p.salida -match 'not found|Authentication|403|denied|permission') {
-                Ojo 'Es el permiso: inicia sesion con tu usuario de GitHub de la organizacion y pide acceso al repositorio si no lo tienes. Si sale una pagina de Fortinet, es el cortafuegos: elige la carpeta compartida.'
-            } else {
-                Ojo 'Parece la red: el cortafuegos o el proxy de la empresa corta GitHub. Pide a sistemas que permitan github.com para Git, o elige la carpeta compartida.'
-            }
-        }
-        '2' {
-            $c = Read-Host "  Carpeta con la version publicada$(if ($carpetaPropuesta) { " (Intro = $carpetaPropuesta)" })"
-            if (-not $c) { $c = $carpetaPropuesta }
-            $c = [Environment]::ExpandEnvironmentVariables($c.Trim().Trim('"'))
-            if (-not $c) { break }
-            if (Igual $c $repo) { Mal "Esa es la copia de tu equipo ($repo), no la compartida."; break }
-            if (EsPublicado $c) { Bien "Carpeta compartida: $c"; $origen = $c } else { Mal "En $c no esta la version publicada (VERSION y actualizar.ps1). Si es de red, ¿estas en la red de la empresa o en la VPN?" }
-        }
-        '3' { $origen = 'ninguno' }
-        default { Mal 'Escribe 1, 2 o 3.' }
-    }
-}
-$recibir = if ($origen -eq 'ninguno') { 'no' } elseif (SiNo '    ¿Recibir actualizaciones automaticas al arrancar PL/SQL Developer?' ((Ajuste 'ActualizacionesAutomaticas' 'si') -ne 'no')) { 'si' } else { 'no' }
-
-# Copia en la carpeta compartida: solo quien mantiene el plug-in, con -Espejo; si ya lo tenia, se respeta
-$espejoFinal = if ($Espejo) { [Environment]::ExpandEnvironmentVariables($Espejo.Trim('"')) } else { Ajuste 'EspejoPublicado' }
-if ($Espejo) {
-    if ($origen -ne 'git') { Ojo '-Espejo solo sirve si este equipo se actualiza desde GitHub (opcion 1): no se copiara nada.' }
-    else {
-        try { New-Item -ItemType Directory -Force -Path $espejoFinal | Out-Null; Bien "Cada version que baje este equipo se dejara en $espejoFinal para los demas." }
-        catch { Mal "No puedo crear $espejoFinal ($($_.Exception.Message)): no se copiara nada."; $espejoFinal = '' }
-    }
-}
+$recibir = if (SiNo '    ¿Recibir actualizaciones automaticas?' ((Ajuste 'ActualizacionesAutomaticas' 'si') -ne 'no')) { 'si' } else { 'no' }
 
 # Publicar las skills solo lo activa quien las mantiene, con -Publicar; si ya lo tenia, se respeta
 $publicarSkills = if ($Publicar) { 'si' } else { Ajuste 'PublicarSkills' 'no' }
@@ -236,7 +190,7 @@ New-Item -ItemType Directory -Force -Path $dirPlugin | Out-Null
 $lineas = New-Object 'System.Collections.Generic.List[string]'
 if (Test-Path $ini) { $lineas.AddRange([System.IO.File]::ReadAllLines($ini, $utf8)) }
 $nuevos = [ordered]@{ DllInstalada = $dll; Skills = ($elegidas -join ','); TareaProgramada = $tarea; ActualizacionesAutomaticas = $recibir; PublicarSkills = $publicarSkills
-                      Origen = $origen; EspejoPublicado = $espejoFinal; MostrarNovedades = (Ajuste 'MostrarNovedades' 'si') }
+                      MostrarNovedades = (Ajuste 'MostrarNovedades' 'si') }
 foreach ($k in $nuevos.Keys) {
     $i = -1; for ($j = 0; $j -lt $lineas.Count; $j++) { if ($lineas[$j] -match "^\s*$k\s*=") { $i = $j; break } }
     if ($i -ge 0) { $lineas[$i] = "$k=$($nuevos[$k])" }
@@ -246,9 +200,7 @@ foreach ($k in $nuevos.Keys) {
             $lineas.Add(''); $lineas.Add('[Actualizaciones]')
             $lineas.Add('; Los escribe instalar.ps1 (vuelve a ejecutarlo para cambiarlos). ActualizacionesAutomaticas=no deja la version')
             $lineas.Add('; instalada. PublicarSkills=si solo en el equipo de quien mantiene las skills (instalar.ps1 -Publicar).')
-            $lineas.Add('; Origen = git (GitHub), una carpeta compartida con la version publicada o ninguno. EspejoPublicado = carpeta')
-            $lineas.Add('; donde deja cada version el equipo de quien mantiene el plug-in (instalar.ps1 -Espejo). MostrarNovedades=no')
-            $lineas.Add('; quita la ventana de novedades al actualizar.')
+            $lineas.Add('; MostrarNovedades=no quita la ventana de novedades al actualizar.')
             $s = $lineas.Count - 1
         }
         # Al final de la seccion (antes de la siguiente y de las lineas en blanco que la separan)
@@ -262,29 +214,17 @@ foreach ($k in $nuevos.Keys) {
 [System.IO.File]::WriteAllLines($ini, $lineas, (New-Object System.Text.UTF8Encoding $true))
 Bien "Ajustes guardados en $ini"
 
-# La copia de la version en este equipo (%APPDATA%\ClaudeCodePlsql\repo), de donde lee la actualizacion
-if ($origen -eq 'git') {
-    if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) {
-        $tmp = "$repo.nuevo"
-        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
-        $c = GitW @('clone', '-q', '--depth', '1', '--branch', 'publicado', $urlRepo, $tmp)
-        if (-not $c.ok) { Mal "No he podido bajar la version de GitHub: $($c.salida)"; exit 1 }
-        if (Test-Path -LiteralPath $repo) { Remove-Item -LiteralPath $repo -Recurse -Force }
-        Rename-Item -LiteralPath $tmp -NewName (Split-Path $repo -Leaf)
-    }
-    Bien "Copia de GitHub en $repo"
+# La copia de Git en este equipo (%APPDATA%\ClaudeCodePlsql\repo), de donde lee la actualizacion. Si no esta (se ha
+# ejecutado el instalador del ZIP, por ejemplo), se hace ahora.
+if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) {
+    $tmp = "$repo.nuevo"
+    if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
+    $c = GitW @('clone', '-q', '--depth', '1', '--branch', 'publicado', $urlRepo, $tmp)
+    if (-not $c.ok) { Mal "No he podido bajar la version de GitHub: $($c.salida)"; exit 1 }
+    if (Test-Path -LiteralPath $repo) { Remove-Item -LiteralPath $repo -Recurse -Force }
+    Rename-Item -LiteralPath $tmp -NewName (Split-Path $repo -Leaf)
 }
-elseif (-not (Igual $aqui $repo)) {
-    # De la carpeta compartida (o, sin actualizaciones, de donde se ejecuta el instalador). Si era una copia de Git,
-    # deja de serlo: a partir de ahora la pone al dia la copia de la carpeta.
-    $de = if ($origen -ne 'ninguno') { $origen } else { $aqui }
-    if (Test-Path -LiteralPath (Join-Path $repo '.git')) { Remove-Item -LiteralPath (Join-Path $repo '.git') -Recurse -Force }
-    $null = & robocopy $de $repo /MIR /XD .git /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
-    if ($LASTEXITCODE -ge 8) { Mal "No he podido copiar la version de $de a $repo (robocopy $LASTEXITCODE)."; exit 1 }
-    # Lo bajado con el navegador lleva la marca de Internet: se quita para que Windows no pregunte al ejecutarlo
-    Get-ChildItem -LiteralPath $repo -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
-    Bien "Copia de $de en $repo"
-}
+Bien "Copia de GitHub en $repo"
 
 $r = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repo 'actualizar.ps1') -Instalando 2>&1
 $estado = Get-Content (Join-Path $dirPlugin 'actualizacion.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -299,13 +239,12 @@ Titulo 'Listo'
 Write-Host '  Abre (o reinicia) PL/SQL Developer: tendras la pestaña Claude Code.'
 Write-Host '  Con Node.js instalado, el boton Panel de sesiones te enseña todas las sesiones de Claude abiertas, en directo.'
 if ($recibir -eq 'si') {
-    $deDonde = if ($origen -eq 'git') { 'GitHub' } else { $origen }
-    Write-Host "  A partir de ahora, cada vez que arranque PL/SQL Developer se bajan solas ($deDonde) las versiones nuevas del"
+    Write-Host '  A partir de ahora, cada vez que arranque PL/SQL Developer se bajan solas de GitHub las versiones nuevas del'
     Write-Host '  plug-in y de las skills elegidas; la DLL nueva se aplica al reiniciarlo. Con cada version nueva se abre una'
     Write-Host '  ventana con sus novedades.'
 } else {
     Write-Host '  Sin actualizaciones automaticas: para pasar a una version nueva, vuelve a ejecutar este script.'
 }
 Write-Host '  Para cambiar lo elegido, vuelve a ejecutar este script.'
-# Al cambiar de version con el instalador (sin actualizaciones automaticas) tambien se ven las novedades
+# Al cambiar de version con el instalador tambien se ven las novedades
 if ($estado.novedades -and (Test-Path -LiteralPath $estado.novedades)) { Start-Process -FilePath $estado.novedades }

@@ -1,12 +1,8 @@
 ﻿# Actualizacion automatica del plug-in "Claude Code para PL/SQL Developer" y de su paquete de skills.
 # La lanza el plug-in en segundo plano al arrancar PL/SQL Developer (y el instalador, la primera vez).
 #
-#   1. Baja la ultima version publicada a %APPDATA%\ClaudeCodePlsql\repo, segun Origen en ClaudeCode.ini:
-#        git      = rama "publicado" del repositorio de GitHub (con los certificados de Windows, ver Git).
-#        <carpeta> = copia de esa rama en una carpeta compartida (de red, SharePoint u OneDrive): no hace falta Git ni
-#                   salir a Internet. La deja ahi el equipo de quien mantiene el plug-in (EspejoPublicado, abajo).
-#        ninguno  = no se baja nada; para pasar a otra version se vuelve a ejecutar instalar.ps1.
-#   1b. Solo en el equipo de quien mantiene el plug-in (EspejoPublicado=<carpeta>): deja la version en esa carpeta.
+#   1. Baja la ultima version publicada (rama "publicado" del repositorio, en %APPDATA%\ClaudeCodePlsql\repo), con Git
+#      usando los certificados de Windows (ver Git).
 #   2. Si la DLL ha cambiado, la deja en su sitio: la que esta cargada se renombra a .old (Windows lo permite) y la
 #      nueva se aplica al reiniciar PL/SQL Developer.
 #   2b. Deja el panel de sesiones en %APPDATA%\ClaudeCodePlsql\panel-app\<version> (y actual.txt apuntando a el).
@@ -46,16 +42,6 @@ function Git([string[]]$a) {
     return $salida
 }
 
-# Deja en $a una copia de la version publicada que hay en $de (sin .git), con VERSION la ultima: quien lea la carpeta
-# a medias ve todavia la version anterior y no la da por buena. Solo copia lo que ha cambiado (tamaño y fecha).
-function CopiarPublicado([string]$de, [string]$a) {
-    New-Item -ItemType Directory -Force -Path $a | Out-Null
-    $null = & robocopy $de $a /MIR /XD .git /XF VERSION /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
-    if ($LASTEXITCODE -ge 8) { throw "No he podido copiar de $de a $a (robocopy $LASTEXITCODE)." }
-    Copy-Item -LiteralPath (Join-Path $de 'VERSION') -Destination (Join-Path $a 'VERSION') -Force
-    $global:LASTEXITCODE = 0
-}
-
 function Leer([string]$f) { if (Test-Path -LiteralPath $f) { [System.IO.File]::ReadAllText($f) } else { '' } }
 
 # Ajustes de [Actualizaciones] en ClaudeCode.ini
@@ -90,12 +76,7 @@ function Espejo([string]$de, [string]$a) {
 }
 
 try {
-    # De donde se baja. Las instalaciones de antes de poder elegirlo no lo tienen en el .ini: son de Git.
-    $origen = Ajuste 'Origen'
-    if (-not $origen) { $origen = if (Test-Path -LiteralPath (Join-Path $repo '.git')) { 'git' } else { 'ninguno' } }
-    if (-not (Test-Path -LiteralPath (Join-Path $repo 'VERSION')) -and $origen -eq 'ninguno') {
-        throw "No hay ninguna version en ${repo}: instala el plug-in con instalar.ps1."
-    }
+    if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) { throw "No hay copia del repositorio en ${repo}: instala el plug-in con instalar.ps1." }
     $fVersion = Join-Path $repo 'VERSION'
     $cambiosAntes = Leer (Join-Path $repo 'CAMBIOS.md')
 
@@ -103,34 +84,9 @@ try {
     $recibir = $Instalando -or ((Ajuste 'ActualizacionesAutomaticas' 'si') -notmatch '^(no|n|false|0)$')
     if ($recibir) {
     # ------------------------------------------------------------------------ 1. ultima version publicada
-    if ($origen -eq 'git') {
-        if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) { throw "No hay copia del repositorio en ${repo}: vuelve a ejecutar instalar.ps1." }
-        Git @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', 'publicado') | Out-Null
-        Git @('-C', $repo, 'reset', '-q', '--hard', 'origin/publicado') | Out-Null
-    }
-    elseif ($origen -ne 'ninguno') {
-        $fOrigen = Join-Path $origen 'VERSION'
-        if (-not (Test-Path -LiteralPath $fOrigen)) {
-            throw "No encuentro la version publicada en $origen (falta VERSION). Si es una carpeta de red, comprueba que estas en la red de la empresa o en la VPN."
-        }
-        # Se copia solo si cambia la version; si mientras se copiaba ha llegado otra, se vuelve a copiar
-        for ($i = 0; $i -lt 3 -and (Leer $fOrigen).Trim() -ne (Leer $fVersion).Trim(); $i++) { CopiarPublicado $origen $repo }
-    }
+    Git @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', 'publicado') | Out-Null
+    Git @('-C', $repo, 'reset', '-q', '--hard', 'origin/publicado') | Out-Null
     if (Test-Path -LiteralPath $fVersion) { $estado.version = (Leer $fVersion).Trim() }
-
-    # ------------------------------------------------------------------------ 1b. copia en la carpeta compartida
-    # Solo en el equipo de quien mantiene el plug-in, que se actualiza desde GitHub: los demas leen de esa carpeta.
-    $espejo = Ajuste 'EspejoPublicado'
-    if ($espejo -and $origen -eq 'git') {
-        try {
-            if ((Leer (Join-Path $espejo 'VERSION')).Trim() -ne $estado.version) {
-                CopiarPublicado $repo $espejo
-                $estado['espejo'] = "Version $($estado.version) copiada en $espejo"
-            }
-        } catch {
-            $estado.errores += "No he podido dejar la version en la carpeta compartida ${espejo}: $($_.Exception.Message)"
-        }
-    }
 
     # ------------------------------------------------------------------------ 2. la DLL
     $dll = Ajuste 'DllInstalada'
