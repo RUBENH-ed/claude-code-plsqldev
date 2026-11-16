@@ -100,7 +100,8 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
-    encolar({ tipo: 'turno', texto: corto(e.text, 500), subagente: e.agentId !== undefined })
+    // Con el id de la conversación: cambia tras /clear, y el plug-in lo necesita para asignarla a un expediente
+    encolar({ tipo: 'turno', texto: corto(e.text, 500), subagente: e.agentId !== undefined, sesion: await $.session.id() })
     return next(e)
   })
 

@@ -6,7 +6,8 @@ name: build
 
 on:
   push:
-    branches: [main]
+    # Las ramas pruebas/... se compilan y se prueban, pero no se publican (publicar solo corre en main)
+    branches: [main, 'pruebas/**']
   workflow_dispatch:
 
 jobs:

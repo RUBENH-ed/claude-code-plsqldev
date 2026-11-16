@@ -35,6 +35,8 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
 | **Documentación** | En un expediente: A18 y manual de desarrollo con sus skills. |
 | **Preparar instalación** | En un expediente: lista y orden de compilación de los fuentes y el script de instalación. |
 | **Panel de sesiones** | Abre el panel con todas las sesiones de Claude abiertas desde el plug-in, en directo (ver *Panel de sesiones*). |
+| **Elegir ventana de Claude** | Abre la ventana activa (guardada o no) en la sesión de Claude que elijas, o en una sesión nueva aquí o en otra carpeta. |
+| **Asignar expediente** | Pasa una conversación empezada fuera de un expediente a uno (o a un tema con título): crea la carpeta, mueve la conversación y la reabre allí. |
 | **Ayuda** | Abre la guía de uso (`ayuda/ayuda.html`, incrustada en la DLL): qué hace cada botón, expedientes, BBDD, panel y problemas frecuentes. Se abre sola la primera vez tras instalar o actualizar a una versión con ayuda nueva. |
 
 ### Cómo funciona
@@ -44,7 +46,8 @@ menú contextual (clic derecho) de las ventanas SQL, de programa, de test y de c
      skill `proyecto-expediente`), esa carpeta. La copia va a `.px\ventanas\` y el plug-in deja en `.px\` su
      propio `CLAUDE.md` (el de la raíz es del proyecto y no lo toca).
    - Si la ventana no tiene fichero de expediente (por ejemplo, un paquete abierto desde la base de datos),
-     pregunta si usar el último expediente o la carpeta general, y lo recuerda para esa ventana.
+     pregunta en una lista: expedientes y temas recientes, la carpeta general o *Nuevo con título* (un tema con su
+     carpeta `doc` y la marca `.px\tema.json`, o un expediente si se le pone número), y lo recuerda para esa ventana.
    - En otro caso, `CarpetaTrabajo`, con las copias en `ventanas\` y un `CLAUDE.md` con las normas de EDISA.
 2. Cada ventana se guarda como `PROPIETARIO.OBJETO.pkb`, `.pks`, `.prc`, `.fnc`, `.trg`… o
    `ventana_sql_XXXX.sql` si no es un objeto, en UTF-8. Claude Code se abre en la carpeta de trabajo con un
@@ -204,6 +207,7 @@ La primera vez se crea `%APPDATA%\ClaudeCodePlsql\ClaudeCode.ini` con la configu
 | `ModoExpedientes` | `si` | `si`: abre Claude en la carpeta del expediente; `no`: siempre en la general. |
 | `SoloWindows1252` | `si` | `si`: no carga en el editor texto con caracteres que no existen en Windows-1252. |
 | `RetomarConversacion` | `si` | `si`: abre Claude con `--continue`, retomando la última conversación de esa carpeta (si no hay, empieza una). |
+| `MensajesDetallados` | `si` | `no`: al pasar una ventana o una BD, el mensaje lleva solo la referencia (`PACKAGE LIBRA.PK_X: @.px/ventanas/LIBRA.PK_X.pkb`); las instrucciones van en el prompt de sistema de la sesión. Si se elige en *Personalizar* del panel, manda lo del panel. |
 | `PanelLateral` | `si` | `si`: una sola ventana de Claude por carpeta, a la derecha de PL/SQL Developer; si ya está abierta, la trae al frente y deja en el portapapeles la referencia para pegarla. |
 | `AnchoPanel` | `35` | Ancho del panel de Claude en % de la pantalla (20-60). |
 | `Terminal` | `auto` | `auto`, `wt` (Windows Terminal) o `consola` (PowerShell normal). |

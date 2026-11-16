@@ -56,7 +56,9 @@
             <button type="button" data-vista="terminal" aria-pressed="true">Terminal</button>
             <button type="button" data-vista="mosaico" aria-pressed="false">Todas</button>
           </div>
+          <button type="button" id="btn-pegar" title="Pega en la sesión lo que tienes copiado (texto o, si es una imagen, la imagen)">Pegar</button>
           <button type="button" id="btn-esc" title="Manda la tecla Esc: interrumpe lo que esté haciendo Claude">Interrumpir</button>
+          <button type="button" id="btn-asignar" title="Pasa esta conversación a un expediente o tema: la próxima vez que abras algo de esa carpeta, sigue en ella">Asignar expediente</button>
           <button type="button" id="btn-cerrar" class="peligro" title="Cierra la terminal de esta sesión">Cerrar sesión</button>
           <button type="button" id="btn-olvidar" hidden>Quitar de la lista</button>
           <span class="separador" aria-hidden="true"></span>
@@ -185,6 +187,22 @@
             </label>
             <p class="nota">Vale para las sesiones que abras a partir de ahora.</p>
           </fieldset>
+          <fieldset>
+            <legend>Mensaje al pasar una ventana o una BD a Claude</legend>
+            <label class="opcion">
+              <input type="radio" name="mensajes" value="auto">
+              <span>Según ClaudeCode.ini (MensajesDetallados; detallado si no lo has cambiado)</span>
+            </label>
+            <label class="opcion">
+              <input type="radio" name="mensajes" value="detallados">
+              <span>Detallado: explica qué se le pasa y qué tiene que hacer con ello</span>
+            </label>
+            <label class="opcion">
+              <input type="radio" name="mensajes" value="breves">
+              <span>Breve: solo la ventana y su copia, por ejemplo «PACKAGE LIBRA.PK_X: @.px/ventanas/LIBRA.PK_X.pkb»</span>
+            </label>
+            <p class="nota">Claude sabe igualmente qué hacer: las instrucciones van en la configuración de la sesión, no en el mensaje.</p>
+          </fieldset>
         </div>
 
         <div>
@@ -228,9 +246,11 @@
         </ul>
         <h3>Botones</h3>
         <ul>
-          <li><b>Nueva sesión</b>: abre Claude en un expediente sin pasar por una ventana del IDE (PL/SQL Developer tiene que estar abierto).</li>
+          <li><b>Nueva sesión</b>: abre Claude en un expediente o tema sin pasar por una ventana del IDE (PL/SQL Developer tiene que estar abierto).</li>
           <li><b>Terminal / Todas</b>: una sesión en grande, o todas a la vez en pequeño. Pulsa una para ir a ella.</li>
+          <li><b>Pegar</b>: pega en la sesión lo que tienes copiado. Si es una imagen, se la pasa a Claude (como Alt+V). La primera vez el navegador te pide permiso para leer el portapapeles.</li>
           <li><b>Interrumpir</b>: manda Esc a la sesión (para lo que esté haciendo Claude).</li>
+          <li><b>Asignar expediente</b>: pasa la conversación a un expediente (nuevo o existente) o a un tema con título. PL/SQL Developer te pregunta el número, el título y dónde crear la carpeta; cierra la sesión y la abre allí con la misma conversación.</li>
           <li><b>Cerrar sesión</b>: cierra su terminal. La conversación se guarda y se retoma al volver a abrirla.</li>
           <li><b>Ampliar</b>: pliega la lista y la actividad para que la terminal ocupe todo. Cada columna se pliega también con su flecha.</li>
           <li><b>Personalizar</b>: dónde va la lista y la actividad, colores, tamaño de letra y si las sesiones abren ventana de terminal.</li>

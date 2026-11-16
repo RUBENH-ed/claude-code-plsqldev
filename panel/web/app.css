@@ -241,6 +241,8 @@ html[data-lista-plegada="si"][data-lista="arriba"] .sesion { padding: 6px 12px 6
 .vistas button { border: 0; border-radius: 0; background: transparent; color: var(--suave); }
 .vistas button[aria-pressed="true"] { background: var(--panel-alto); color: var(--texto); }
 
+.app[data-vista="mosaico"] #btn-pegar,
+.app[data-vista="mosaico"] #btn-asignar,
 .app[data-vista="mosaico"] #btn-esc,
 .app[data-vista="mosaico"] #btn-cerrar,
 .app[data-vista="mosaico"] #btn-olvidar,

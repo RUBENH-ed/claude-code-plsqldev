@@ -7,6 +7,10 @@
 //   node abrir.js --titulo <t> [--pegar <fichero>]
 //                                          si hay una sesión abierta con ese título, deja el texto del fichero en su
 //                                          cuadro de mensaje (sin enviarlo) y la enseña; si no la hay, sale con código 3
+//   node abrir.js --id <id> [--pegar <fichero>]
+//                                          lo mismo, con la sesión elegida por su id
+//   node abrir.js --lista                  escribe en JSON las sesiones (id, titulo, carpeta, viva, sinVentana, claudeId)
+//   node abrir.js --cerrar <id>            cierra esa sesión y espera a que termine (código 4 si no termina en 20 s)
 //   node abrir.js --navegador              siempre en el navegador predeterminado
 //   node abrir.js --imprimir               solo escribe el enlace de entrada (vale una vez y durante 2 minutos)
 
@@ -113,10 +117,32 @@ function valor(args, nombre) {
     process.exit(1);
   }
 
-  const titulo = valor(args, '--titulo');
-  if (titulo !== undefined) {
+  if (args.includes('--lista')) {
     const { sesiones } = await api('GET', '/api/sesiones');
-    const s = sesiones.find(x => x.viva && x.titulo === titulo);
+    process.stdout.write(JSON.stringify(sesiones));
+    return;
+  }
+
+  const cerrar = valor(args, '--cerrar');
+  if (cerrar !== undefined) {
+    await api('POST', `/api/sesiones/${encodeURIComponent(cerrar)}/cerrar`);
+    // Espera a que la sesión termine (Claude guarda la conversación al salir)
+    const hasta = Date.now() + 20000;
+    while (Date.now() < hasta) {
+      await new Promise(r => setTimeout(r, 400));
+      const { sesiones } = await api('GET', '/api/sesiones');
+      const s = sesiones.find(x => x.id === cerrar);
+      if (!s || !s.viva) return;
+    }
+    console.error('La sesión no ha terminado en 20 segundos.');
+    process.exit(4);
+  }
+
+  const titulo = valor(args, '--titulo');
+  const porId = valor(args, '--id');
+  if (titulo !== undefined || porId !== undefined) {
+    const { sesiones } = await api('GET', '/api/sesiones');
+    const s = sesiones.find(x => x.viva && (porId !== undefined ? x.id === porId : x.titulo === titulo));
     if (!s) process.exit(NO_HAY_SESION);
     const fichero = valor(args, '--pegar');
     if (fichero) {

@@ -28,7 +28,7 @@ internal static unsafe class Plugin
     public const int MenuOpen = 3, MenuAskSelection = 4, MenuPull = 5, MenuCopyRef = 6, MenuFolder = 8, MenuConfig = 9,
         MenuConnect = 11, MenuDisconnect = 12, MenuSetDev = 13,
         MenuCompare = 15, MenuReview = 16, MenuExplainError = 17, MenuDocs = 18, MenuInstall = 19,
-        MenuSessions = 21, MenuHelp = 23;
+        MenuSessions = 21, MenuOpenIn = 22, MenuAssign = 23, MenuHelp = 25;
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly Dictionary<int, Link> Links = new();
@@ -108,6 +108,8 @@ internal static unsafe class Plugin
                 case MenuDocs: ProjectTask(Prompts.DocsTask, "Claude prepara la documentación del expediente"); break;
                 case MenuInstall: ProjectTask(Prompts.InstallTask, "Claude prepara la instalación del expediente"); break;
                 case MenuSessions: Panel.Open(); break;
+                case MenuOpenIn: OpenInSession(); break;
+                case MenuAssign: AssignProject(null); break;
                 case MenuHelp: Help.Open(); break;
             }
         }
@@ -125,10 +127,199 @@ internal static unsafe class Plugin
         if (link == null) return;
 
         string copy = link.Ws.Relative(link.Path);
-        string prompt = Prompts.Open(link.Ws, link.Title, copy, ConnectionText(), link.Original);
-        string again = Prompts.Again(link.Title, copy, ConnectionText(), null);
+        bool brief = Panel.BriefMessages();
+        string prompt = brief ? Prompts.Short(link.Title, copy, ConnectionText())
+            : Prompts.Open(link.Ws, link.Title, copy, ConnectionText(), link.Original);
+        string again = brief ? prompt : Prompts.Again(link.Title, copy, ConnectionText(), null);
 
         Launch(link.Ws, prompt, again, $"Claude Code abierto con {System.IO.Path.GetFileName(link.Path)}{Where(link.Ws)}");
+    }
+
+    /// <summary>
+    /// Botón «Abrir en sesión…»: la ventana activa (guardada o no) en la sesión de Claude que se elija de las abiertas,
+    /// o en una sesión nueva (en la carpeta de la ventana o en otra, incluido un tema nuevo con título).
+    /// </summary>
+    private static void OpenInSession()
+    {
+        int child = Ide.ChildWindow;
+        if (child == 0 || !Ide.HasCodeEditor)
+        {
+            Win32.Message("Activa primero una ventana con código (SQL, programa, test o comandos).", Win32.MB_ICONINFORMATION);
+            return;
+        }
+
+        List<Session> live = Sessions.Live();
+        Workspace here = CurrentWorkspaceNoAsk();
+        var options = Sessions.Options(live);
+        options.Add(new Dialog.Option("nueva-aqui", "Sesión nueva aquí",
+            (here.IsProject ? $"{here.Kind} {here.Label}" : "Carpeta general") + " · " + here.Root));
+        options.Add(new Dialog.Option("nueva-otra", "Sesión nueva en otra carpeta o tema…", "Recientes, carpeta general o uno nuevo con título"));
+        int pre = live.FindIndex(s => s.Folder.Length > 0 && Workspace.FromFolder(s.Folder, Config.Workspace).SameAs(here));
+
+        var r = Dialog.Show("Claude Code: abrir en sesión",
+            "¿En qué sesión de Claude abro esta ventana? Su texto se pasa a la carpeta de esa sesión (no hace falta que " +
+            "la ventana esté guardada) y Claude lo recibe allí.",
+            options, pre >= 0 ? pre : live.Count, accept: "Abrir");
+        if (r == null) return;
+
+        if (Sessions.FromOption(r.Option, live) is Session target)
+        {
+            if (target.Folder.Length == 0)
+            {
+                Win32.Message($"No sé en qué carpeta está la sesión «{target.Name}» (se abrió sin el panel de sesiones). " +
+                              "Ábrela desde su carpeta o con el panel de sesiones activado.", Win32.MB_ICONINFORMATION);
+                return;
+            }
+            Workspace ws = Workspace.FromFolder(target.Folder, Config.Workspace);
+            Link? link = ExportActiveWindow(ws);
+            if (link == null) return;
+            string copy = link.Ws.Relative(link.Path);
+            Deliver(target, link.Ws, Panel.BriefMessages() ? Prompts.Short(link.Title, copy, ConnectionText())
+                    : Prompts.Again(link.Title, copy, ConnectionText(), null),
+                $"Ventana pasada a la sesión {target.Name}");
+            return;
+        }
+
+        Workspace? dest = r.Option == "nueva-aqui" ? here
+            : r.Option == "nueva-otra" ? ChooseFolder("¿En qué carpeta abro la sesión nueva?") : null;
+        if (dest == null) return;
+        Link? l = ExportActiveWindow(dest);
+        if (l == null) return;
+        string c = l.Ws.Relative(l.Path);
+        bool shortText = Panel.BriefMessages();
+        Launch(l.Ws,
+            shortText ? Prompts.Short(l.Title, c, ConnectionText()) : Prompts.Open(l.Ws, l.Title, c, ConnectionText(), l.Original),
+            shortText ? Prompts.Short(l.Title, c, ConnectionText()) : Prompts.Again(l.Title, c, ConnectionText(), null),
+            $"Claude Code abierto con {System.IO.Path.GetFileName(l.Path)}{Where(l.Ws)}", forceNew: true);
+    }
+
+    /// <summary>
+    /// Deja un texto escrito (sin enviarlo) en una sesión concreta: en el panel, por su id; sin panel, en el portapapeles
+    /// y con su ventana delante.
+    /// </summary>
+    private static void Deliver(Session target, Workspace ws, string text, string status)
+    {
+        var panel = Panel.Available();
+        if (target.InPanel && panel != null && Panel.PasteTo(panel.Value, target.Id, text, ws.InternalDir))
+        {
+            Ide.Status($"{status}: te he dejado el mensaje escrito en el panel; revísalo y pulsa Intro.");
+            return;
+        }
+        nint window = Win32.FindTopWindow(target.Title);
+        bool copied = Win32.SetClipboardText(text);
+        if (window != 0) Win32.BringToFront(window);
+        Ide.Status(copied
+            ? $"{status}: pega con Ctrl+V en la sesión lo que te he copiado y pulsa Intro."
+            : $"{status}, pero no he podido copiar el mensaje (usa Copiar referencia).");
+    }
+
+    /// <summary>
+    /// Botón «Asignar expediente» (o el del panel, con la sesión ya elegida): una conversación empezada fuera de un
+    /// expediente pasa a uno (nuevo o existente, con número) o a un tema con título. Crea la carpeta donde se elija,
+    /// cierra la sesión, mueve su conversación a la carpeta nueva y la reabre allí retomándola. Desde entonces, lo que
+    /// se abra de esa carpeta va a esa conversación.
+    /// </summary>
+    private static void AssignProject(string? panelId)
+    {
+        List<Session> live = Sessions.Live();
+        Session? target = panelId != null ? live.FirstOrDefault(s => s.Id == panelId) : null;
+        if (target == null)
+        {
+            if (panelId != null)
+            {
+                Win32.Message("Esa sesión ya no está abierta.", Win32.MB_ICONINFORMATION);
+                return;
+            }
+            if (live.Count == 0)
+            {
+                Win32.Message("No hay ninguna sesión de Claude abierta desde el plug-in.", Win32.MB_ICONINFORMATION);
+                return;
+            }
+            Workspace here = CurrentWorkspaceNoAsk();
+            int pre = live.FindIndex(s => s.Folder.Length > 0 && Workspace.FromFolder(s.Folder, Config.Workspace).SameAs(here));
+            var pick = Dialog.Show("Claude Code: asignar expediente", "¿Qué conversación quieres asignar a un expediente o tema?",
+                Sessions.Options(live), Math.Max(pre, 0), accept: "Siguiente");
+            target = pick == null ? null : Sessions.FromOption(pick.Option, live);
+            if (target == null) return;
+        }
+        if (target.Folder.Length == 0)
+        {
+            Win32.Message($"No sé en qué carpeta está la sesión «{target.Name}» (se abrió sin el panel de sesiones), así que " +
+                          "no puedo encontrar su conversación.", Win32.MB_ICONINFORMATION);
+            return;
+        }
+        Workspace from = Workspace.FromFolder(target.Folder, Config.Workspace);
+
+        // Donde se crea: por defecto, junto al último expediente (o la carpeta de temas)
+        string last = Config.LastProject.TrimEnd('\\', '/');
+        string parent = last.Length > 0 && Directory.Exists(last) ? System.IO.Path.GetDirectoryName(last) ?? "" : "";
+        if (parent.Length == 0) parent = System.IO.Path.Combine(Config.Workspace, "temas");
+        try { Directory.CreateDirectory(parent); } catch (Exception e) { Log.Error(e); }
+
+        var fields = NewProjectFields(parent);
+        fields[1] = fields[1] with { Label = "Número de expediente (7 cifras; vacío para un tema)" };
+        var r = Dialog.Show("Claude Code: asignar expediente",
+            $"La conversación de «{target.Name}» ({target.Folder}) pasa a este expediente o tema. Si la carpeta ya existe, " +
+            "se usa tal cual. La sesión se cierra y se vuelve a abrir allí con la misma conversación.",
+            fields: fields, accept: "Asignar");
+        if (r == null) return;
+        Workspace? ws = CreateFromFields(r);
+        if (ws == null) return;
+        if (ws.SameAs(from))
+        {
+            Win32.Message($"La sesión ya está en {ws.Label}.", Win32.MB_ICONINFORMATION);
+            return;
+        }
+
+        // La conversación se mueve con la sesión cerrada, para llevársela entera
+        var panel = Panel.Available();
+        if (target.InPanel && panel != null)
+        {
+            Ide.Status($"Cerrando la sesión {target.Name}...");
+            if (!Panel.Close(panel.Value, target.Id) &&
+                Win32.Message("La sesión no se ha cerrado del todo. ¿Sigo igualmente? Lo que diga a partir de ahora no se " +
+                              "llevaría al expediente.", Win32.MB_YESNO | Win32.MB_ICONWARNING) != Win32.IDYES)
+                return;
+        }
+        else if (Win32.Message($"Cierra la ventana de Claude «{target.Name}» (con /exit o cerrando la ventana) y pulsa Aceptar " +
+                               "para llevarme su conversación al expediente.", 0x1 /* MB_OKCANCEL */ | Win32.MB_ICONINFORMATION) != 1)
+        {
+            return;
+        }
+
+        string? file = Transcripts.Find(target.ClaudeId, target.Folder);
+        string? problem = file == null ? "no he encontrado el fichero de la conversación" : Transcripts.Move(file, ws.Root);
+        if (problem != null)
+        {
+            Log.Info($"Asignar {target.Folder} a {ws.Root}: {problem}");
+            Win32.Message($"He creado {ws.Root}, pero no he podido llevar allí la conversación ({problem}). La sesión se " +
+                          "abrirá en la carpeta nueva con una conversación nueva.", Win32.MB_ICONWARNING);
+        }
+        else
+        {
+            Log.Info($"Conversación de {target.Folder} asignada a {ws.Root} ({System.IO.Path.GetFileName(file)}).");
+        }
+
+        // Las ventanas que iban a la carpeta de antes pasan a la nueva (con su copia), para que sigan en esta conversación
+        foreach (Link link in Links.Values.Where(l => l.Ws.SameAs(from)).ToList())
+        {
+            try
+            {
+                Directory.CreateDirectory(ws.WindowsDir);
+                string dest = System.IO.Path.Combine(ws.WindowsDir, System.IO.Path.GetFileName(link.Path));
+                if (File.Exists(link.Path)) File.Copy(link.Path, dest, overwrite: true);
+                link.Ws = ws;
+                link.Path = dest;
+                if (File.Exists(dest)) link.LastWriteUtc = File.GetLastWriteTimeUtc(dest);
+            }
+            catch (Exception e)
+            {
+                Log.Error(e);
+            }
+        }
+
+        string prompt = Prompts.Assigned(ws, target.Folder);
+        Launch(ws, prompt, prompt, $"Conversación asignada al {ws.Kind} {ws.Label}", forceContinue: problem == null);
     }
 
     private static void AskAboutSelection()
@@ -150,9 +341,11 @@ internal static unsafe class Plugin
         File.WriteAllText(selPath, ToCrlf(Normalize(selection)) + "\r\n", Utf8NoBom);
 
         string copy = link.Ws.Relative(link.Path);
-        string prompt = Prompts.Selection(link.Ws, link.Title, copy, ConnectionText(), link.Original,
+        bool brief = Panel.BriefMessages();
+        string prompt = brief ? Prompts.Short(link.Title, copy, ConnectionText(), (link.Ws.Relative(selPath), line)) :
+            Prompts.Selection(link.Ws, link.Title, copy, ConnectionText(), link.Original,
             link.Ws.Relative(selPath), line);
-        string again = Prompts.Again(link.Title, copy, ConnectionText(), (link.Ws.Relative(selPath), line));
+        string again = brief ? prompt : Prompts.Again(link.Title, copy, ConnectionText(), (link.Ws.Relative(selPath), line));
 
         Launch(link.Ws, prompt, again, "Claude Code abierto con la selección" + Where(link.Ws));
     }
@@ -224,8 +417,10 @@ internal static unsafe class Plugin
         if (link == null) return;
 
         string copy = link.Ws.Relative(link.Path);
-        string prompt = Prompts.Task(link.Ws, link.Title, copy, ConnectionText(), link.Original, task);
-        string again = Prompts.TaskAgain(link.Title, copy, ConnectionText(), task);
+        bool brief = Panel.BriefMessages();
+        string prompt = brief ? Prompts.ShortTask(link.Title, copy, ConnectionText(), task)
+            : Prompts.Task(link.Ws, link.Title, copy, ConnectionText(), link.Original, task);
+        string again = brief ? prompt : Prompts.TaskAgain(link.Title, copy, ConnectionText(), task);
         Launch(link.Ws, prompt, again, status + Where(link.Ws));
     }
 
@@ -303,7 +498,7 @@ internal static unsafe class Plugin
     /// </summary>
     private static string? ClientFolder(Workspace ws)
     {
-        if (!ws.IsProject) return null;
+        if (!ws.IsProject || ws.IsTopic) return null; // un tema tiene sus propias BBDD
         string root = System.IO.Path.GetFullPath(ws.Root).TrimEnd('\\', '/');
         if (Config.ClientsRoot.Length > 0)
         {
@@ -356,6 +551,37 @@ internal static unsafe class Plugin
         string dbName = System.Text.RegularExpressions.Regex.Replace(db, "#\\d+$", "");
         string origin = $"{user}@{dbName}";
         Workspace ws = CurrentWorkspaceNoAsk();
+
+        // A qué sesión de Claude se conecta: la de la carpeta de la ventana no siempre es la que se quiere
+        Session? target = null;
+        if (!development)
+        {
+            List<Session> live = Sessions.Live();
+            if (live.Count > 0)
+            {
+                var options = Sessions.Options(live);
+                options.Add(new Dialog.Option("ventana", "La carpeta de esta ventana",
+                    (ws.IsProject ? $"{ws.Kind} {ws.Label}" : "Carpeta general") + " · " + ws.Root));
+                int pre = live.FindIndex(s => s.Folder.Length > 0 && Workspace.FromFolder(s.Folder, Config.Workspace).SameAs(ws));
+                var r = Dialog.Show("Claude Code: conectar BD",
+                    $"¿A qué sesión de Claude conecto {origin}? Queda conectada a la carpeta de esa sesión (en un expediente, a " +
+                    "todos los del mismo cliente) y se lo digo a esa sesión.",
+                    options, pre >= 0 ? pre : live.Count, accept: "Conectar");
+                if (r == null) return;
+                target = Sessions.FromOption(r.Option, live);
+                if (target != null)
+                {
+                    if (target.Folder.Length == 0)
+                    {
+                        Win32.Message($"No sé en qué carpeta está la sesión «{target.Name}» (se abrió sin el panel de sesiones). " +
+                                      "Conéctala desde una ventana de su carpeta.", Win32.MB_ICONINFORMATION);
+                        return;
+                    }
+                    ws = Workspace.FromFolder(target.Folder, Config.Workspace);
+                }
+            }
+        }
+
         string kind = development ? "desarrollo"
             : System.Text.RegularExpressions.Regex.IsMatch(db, "PRUEB|TEST|DESA|DEV|QA|PRE",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase) ? "pruebas" : "produccion";
@@ -396,12 +622,17 @@ internal static unsafe class Plugin
         // Sin comillas dobles: Windows PowerShell 5.1 las rompe al pasar el mensaje a claude.exe. El nombre para -Bd es
         // el que deja alta-bbdd.ps1: el alias en minúsculas, con _ en lo que no sea letra, número o _
         string name = System.Text.RegularExpressions.Regex.Replace(dbName, "[^A-Za-z0-9_]", "_").ToLowerInvariant();
-        string prompt =
-            $"He conectado la BD {origin} ({kind}) a las BBDD {ScopeText(ws)}. Consúltala con & '{WriteQueryScript()}' " +
+        // Breve: el mod de BBDD ya le pasa a Claude la lista con cada mensaje, y la forma de consultar va en su prompt de sistema
+        string prompt = Panel.BriefMessages()
+            ? $"BD {origin} ({kind}) conectada: -Bd {name}."
+            : $"He conectado la BD {origin} ({kind}) a las BBDD {ScopeText(ws)}. Consúltala con & '{WriteQueryScript()}' " +
             $"-Sql 'SELECT ...' -Bd {name}; la de desarrollo sigue siendo la de por defecto. " +
             "Compruébalo con SELECT USER FROM dual. Si el expediente tiene fuentes (cfstd, cfcliente), mira además si los " +
             "objetos que tocan existen en esa BD y si su versión difiere de la de desarrollo, y avísame de lo que cambie.";
-        Launch(ws, prompt, prompt, $"BD {origin} disponible para Claude ({ScopeText(ws)})");
+        if (target != null)
+            Deliver(target, ws, prompt, $"BD {origin} disponible para Claude ({ScopeText(ws)})");
+        else
+            Launch(ws, prompt, prompt, $"BD {origin} disponible para Claude ({ScopeText(ws)})");
     }
 
     /// <summary>Botón "Desconectar BBDD": borra las BBDD del proyecto de la ventana (la de desarrollo se queda).</summary>
@@ -574,28 +805,67 @@ internal static unsafe class Plugin
 
         if (Workspace.FindProjectRoot(ideFile) is string root)
         {
-            Config.SaveLastProject(root);
-            return Workspace.Project(root);
+            Workspace project = Workspace.Project(root);
+            if (!project.IsTopic) Config.SaveLastProject(root);
+            return project;
         }
 
         if (Links.TryGetValue(child, out Link? link)) return link.Ws;
 
-        string last = Config.LastProject.TrimEnd('\\', '/');
-        if (last.Length > 0 && Workspace.IsProjectFolderName(System.IO.Path.GetFileName(last)) && Directory.Exists(last))
+        return ChooseFolder("Esta ventana no es un fichero de ningún expediente. ¿En qué carpeta la abro con Claude? " +
+                            "Con «Nuevo con título» creas un tema (o un expediente, si le pones número) al que podrás " +
+                            "volver como a cualquier expediente.");
+    }
+
+    /// <summary>
+    /// Pregunta la carpeta: los expedientes y temas recientes, la carpeta general o uno nuevo con título (tema, o
+    /// expediente si se le pone número), que se crea donde se elija. Null si se cancela.
+    /// </summary>
+    private static Workspace? ChooseFolder(string text)
+    {
+        var recent = Recent.List();
+        var options = recent.Select((w, i) => new Dialog.Option($"r:{i}", w.Label, (w.IsTopic ? "Tema · " : "Expediente · ") + w.Root)).ToList();
+        options.Add(new Dialog.Option("general", "Carpeta general", Config.Workspace));
+        options.Add(new Dialog.Option("nuevo", "Nuevo con título…", "Crea la carpeta y la recuerda como un expediente"));
+
+        string topics = System.IO.Path.Combine(Config.Workspace, "temas");
+        try { Directory.CreateDirectory(topics); } catch (Exception e) { Log.Error(e); }
+
+        var r = Dialog.Show("Claude Code: ¿dónde lo abro?", text, options, 0, NewProjectFields(topics), "nuevo", "Abrir");
+        if (r == null) return null;
+        if (r.Option == "general") return Workspace.General(Config.Workspace);
+        if (r.Option.StartsWith("r:", StringComparison.Ordinal) && int.TryParse(r.Option[2..], out int ix) && ix < recent.Count)
+            return recent[ix];
+        return r.Option == "nuevo" ? CreateFromFields(r) : null;
+    }
+
+    /// <summary>Campos para crear un expediente o tema: número (opcional), título y carpeta donde crearlo.</summary>
+    private static List<Dialog.Field> NewProjectFields(string parent) => new()
+    {
+        new Dialog.Field("titulo", "Título", Required: true,
+            Help: "Para volver a abrirlo más tarde: aparecerá en esta lista y todo lo que guardes en su carpeta se abrirá con su conversación."),
+        new Dialog.Field("numero", "Número de expediente (opcional, 7 cifras)", Pattern: "^\\d{7}$",
+            Error: "El número de expediente son 7 cifras (o déjalo vacío para un tema).",
+            Help: "Con número se crea «1234567 - Título» con la estructura de un expediente; sin número, un tema con su carpeta doc."),
+        new Dialog.Field("carpeta", "Dentro de la carpeta", parent, "carpeta", Required: true),
+    };
+
+    private static Workspace? CreateFromFields(Dialog.Result r)
+    {
+        try
         {
-            Workspace ws = Workspace.Project(last);
-            int answer = Win32.Message(
-                "Esta ventana no es un fichero de ningún expediente.\n\n" +
-                $"Sí: abrirla con Claude en el último expediente, {ws.Label}.\n" +
-                $"No: en la carpeta general ({Config.Workspace}).\n" +
-                "Cancelar: no hacer nada.",
-                Win32.MB_YESNOCANCEL | Win32.MB_ICONQUESTION);
-
-            if (answer == Win32.IDCANCEL) return null;
-            if (answer == Win32.IDYES) return ws;
+            Workspace ws = Workspace.Create(r.Get("carpeta"), r.Get("numero"), r.Get("titulo"));
+            if (!ws.IsTopic) Config.SaveLastProject(ws.Root);
+            Recent.Add(ws);
+            Log.Info($"Creado el {ws.Kind} {ws.Root}.");
+            return ws;
         }
-
-        return Workspace.General(Config.Workspace);
+        catch (Exception e)
+        {
+            Log.Error(e);
+            Win32.Message($"No he podido crear la carpeta:\n\n{e.Message}", Win32.MB_ICONWARNING);
+            return null;
+        }
     }
 
     /// <summary>Carpeta de la ventana activa sin preguntar: la de su vínculo, la del expediente de su fichero o la general.</summary>
@@ -627,7 +897,7 @@ internal static unsafe class Plugin
     }
 
     /// <summary>Escribe el fichero solo si su contenido ha cambiado (otra sesión de Claude puede estar leyéndolo).</summary>
-    private static void WriteIfChanged(string path, string content, Encoding encoding)
+    internal static void WriteIfChanged(string path, string content, Encoding encoding)
     {
         try
         {
@@ -651,7 +921,7 @@ internal static unsafe class Plugin
     /// Guarda el texto de la ventana activa en su copia de la carpeta de trabajo y devuelve el vínculo.
     /// Si Claude ya había cambiado esa copia y no se ha cargado, pregunta antes de sobrescribirla.
     /// </summary>
-    private static Link? ExportActiveWindow()
+    private static Link? ExportActiveWindow(Workspace? forced = null)
     {
         int child = Ide.ChildWindow;
         if (child == 0 || !Ide.HasCodeEditor)
@@ -661,8 +931,9 @@ internal static unsafe class Plugin
         }
 
         string ideFile = Ide.Filename;
-        Workspace? ws = PickWorkspace(child, ideFile);
+        Workspace? ws = forced ?? PickWorkspace(child, ideFile);
         if (ws == null) return null;
+        Recent.Add(ws);
 
         EnsureWorkspace(ws);
         string editor = Normalize(Ide.GetText());
@@ -855,6 +1126,13 @@ internal static unsafe class Plugin
                     OpenFromPanel(Prop(r, "carpeta"));
                     continue;
                 }
+                if (action == "asignar")
+                {
+                    // Botón «Asignar expediente» del panel: los cuadros de diálogo salen delante de todo
+                    if (System.Text.RegularExpressions.Regex.IsMatch(Prop(r, "sesion"), "^[A-Za-z0-9_-]{8,64}$"))
+                        AssignProject(Prop(r, "sesion"));
+                    continue;
+                }
                 int type = r.TryGetProperty("tipo", out var t) && t.TryGetInt32(out int n) ? n : 0;
 
                 int ix = -1;
@@ -898,13 +1176,13 @@ internal static unsafe class Plugin
         Workspace ws;
         string f = folder.Trim().TrimEnd('\\', '/');
         if (f.Length == 0) ws = Workspace.General(Config.Workspace);
-        else if (Workspace.IsProjectFolderName(System.IO.Path.GetFileName(f)) && Directory.Exists(f)) ws = Workspace.Project(f);
+        else if (Directory.Exists(f) && Workspace.IsProjectFolder(f)) ws = Workspace.Project(f);
         else
         {
             Log.Info($"El panel ha pedido abrir Claude en una carpeta que no es un expediente: {folder}");
             return;
         }
-        if (ws.IsProject) Config.SaveLastProject(ws.Root);
+        if (ws.IsProject && !ws.IsTopic) Config.SaveLastProject(ws.Root);
         Launch(ws, Prompts.FromPanel(ws), "", "Claude abierto desde el panel" + Where(ws), onlyInPanel: true);
     }
 
@@ -1030,9 +1308,25 @@ internal static unsafe class Plugin
     /// Abre Claude Code en la carpeta de trabajo. Con PanelLateral, si ya hay una ventana de Claude de esa carpeta,
     /// la trae al frente y deja en el portapapeles <paramref name="again"/> para pegarlo, en vez de abrir otra.
     /// </summary>
-    private static bool Launch(Workspace ws, string prompt, string again, string status, bool onlyInPanel = false)
+    /// <param name="forceNew">Abrir otra sesión aunque ya haya una en esa carpeta (botón «Abrir en sesión…»): con su
+    /// propio título y, si ya había otra, con una conversación nueva.</param>
+    /// <param name="forceContinue">Retomar la última conversación de la carpeta aunque RetomarConversacion=no
+    /// (al reabrir una sesión en el expediente que se le acaba de asignar).</param>
+    private static bool Launch(Workspace ws, string prompt, string again, string status, bool onlyInPanel = false,
+        bool forceNew = false, bool forceContinue = false)
     {
+        if (ws.IsProject) Recent.Add(ws);
         string title = ClaudeTitle(ws);
+        bool continueConversation = forceContinue || Config.ContinueConversation;
+        if (forceNew)
+        {
+            string unique = Sessions.UniqueTitle(title, Sessions.Live());
+            if (unique != title)
+            {
+                title = unique;
+                continueConversation = false; // la otra sesión de esta carpeta sigue con la suya
+            }
+        }
 
         // Panel de sesiones: la sesión se abre dentro de su anfitrión, que la comparte con el panel, y el mod del panel
         // le cuenta lo que hace Claude. Sin Node.js o sin panel, Claude se abre como siempre. Con la preferencia del
@@ -1045,7 +1339,7 @@ internal static unsafe class Plugin
         }
         bool hidden = panel != null && (onlyInPanel || Panel.HideWindows());
 
-        if (Config.SidePanel && !hidden)
+        if (Config.SidePanel && !hidden && !forceNew)
         {
             nint existing = Win32.FindTopWindow(title);
             if (existing != 0)
@@ -1061,7 +1355,7 @@ internal static unsafe class Plugin
         }
 
         // Una sola sesión por carpeta también en el panel: si ya hay una, se le deja el texto escrito y se enseña
-        if (panel != null && (hidden || Config.SidePanel) && Panel.Reuse(panel.Value, title, again, ws.InternalDir))
+        if (!forceNew && panel != null && (hidden || Config.SidePanel) && Panel.Reuse(panel.Value, title, again, ws.InternalDir))
         {
             Ide.Status(again.Length > 0
                 ? "Claude ya estaba abierto para esta carpeta: te he dejado el mensaje escrito en el panel; revísalo y pulsa Intro."
@@ -1093,7 +1387,8 @@ internal static unsafe class Plugin
         options.Add("--settings");
         options.Add(PsQuote(settingsFile));
         options.Add("--append-system-prompt");
-        options.Add(PsQuote(Templates.ReglaBaseDatos(WriteQueryScript(), DatabaseSummary(ws))));
+        // Las normas de las ventanas van siempre aquí, en el prompt de sistema: así los mensajes breves bastan
+        options.Add(PsQuote(Templates.ReglaBaseDatos(WriteQueryScript(), DatabaseSummary(ws)) + " " + Prompts.WindowRule(ws)));
         options.Add("--plugin-dir");
         options.Add(PsQuote(WriteMod()));
 
@@ -1131,7 +1426,7 @@ internal static unsafe class Plugin
         ps.AppendLine("  Write-Host 'Instala Claude Code o pon la ruta completa en ComandoClaude (plug-in > Configurar).' -ForegroundColor Red");
         ps.AppendLine("  return");
         ps.AppendLine("}");
-        if (Config.ContinueConversation)
+        if (continueConversation)
         {
             // Retoma la última conversación de esta carpeta; si no hay ninguna y claude termina con error enseguida,
             // abre una nueva con el mismo mensaje.
@@ -1304,7 +1599,8 @@ internal static unsafe class Plugin
         return db.Length > 0 ? $" (conexión {user}@{db})" : $" (conexión {user})";
     }
 
-    private static string Where(Workspace ws) => ws.IsProject ? $" (expediente {ws.Number})" : "";
+    private static string Where(Workspace ws) =>
+        ws.IsTopic ? $" (tema {ws.Label})" : ws.IsProject ? $" (expediente {ws.Number})" : "";
 
     private static string Normalize(string s) =>
         s.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n', ' ', '\t').TrimStart('﻿');

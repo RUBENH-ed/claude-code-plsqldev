@@ -27,6 +27,7 @@ internal static class Config
     public static bool ProjectMode = true;         // ModoExpedientes: abrir Claude en la carpeta del expediente
     public static bool OnlyCp1252 = true;          // SoloWindows1252: no cargar texto que no quepa en Windows-1252
     public static bool ContinueConversation = true; // RetomarConversacion: abrir Claude con --continue
+    public static bool DetailedMessages = true;    // MensajesDetallados: explicar en el mensaje lo que se pasa a Claude
     public static bool SidePanel = true;           // PanelLateral: una ventana de Claude por carpeta, a la derecha del IDE
     public static int PanelPercent = 35;           // AnchoPanel: % del ancho de la pantalla para Claude (20-60)
     public static string PanelMode = "auto";       // PanelSesiones: auto (si hay Node.js y panel) | si | no
@@ -70,6 +71,7 @@ internal static class Config
                     case "modoexpedientes": ProjectMode = YesNo(value, true); break;
                     case "solowindows1252": OnlyCp1252 = YesNo(value, true); break;
                     case "retomarconversacion": ContinueConversation = YesNo(value, true); break;
+                    case "mensajesdetallados": DetailedMessages = YesNo(value, true); break;
                     case "panellateral": SidePanel = YesNo(value, true); break;
                     case "anchopanel": if (int.TryParse(value.TrimEnd('%'), out int pct)) PanelPercent = Math.Clamp(pct, 20, 60); break;
                     case "panelsesiones": PanelMode = Choice(value.Replace("í", "i"), "auto", "auto", "si", "no"); break;

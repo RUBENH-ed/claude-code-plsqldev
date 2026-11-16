@@ -132,7 +132,7 @@ let historial = Array.isArray(C.leerJson(FICHERO_HISTORIAL)) ? C.leerJson(FICHER
 
 function apuntarHistorial(s) {
   if (!s.carpeta) return;
-  historial = [{ carpeta: s.carpeta, titulo: s.titulo, hora: Date.now() }, ...historial.filter(h => h.carpeta.toLowerCase() !== s.carpeta.toLowerCase())].slice(0, 30);
+  historial = [{ carpeta: s.carpeta, titulo: s.titulo, hora: Date.now(), proyecto: esProyecto(s.carpeta) }, ...historial.filter(h => h.carpeta.toLowerCase() !== s.carpeta.toLowerCase())].slice(0, 30);
   try {
     C.escribirSeguro(FICHERO_HISTORIAL, JSON.stringify(historial));
   } catch {
@@ -141,11 +141,20 @@ function apuntarHistorial(s) {
   for (const n of navegadores) enviar(n, { t: 'historial', lista: historial });
 }
 
-/** Expediente válido para abrir una sesión: carpeta que existe y se llama «1234567 - Título». Vacío = carpeta general. */
+/** Expediente («1234567 - Título») o tema (carpeta con .px\tema.json, creada desde el plug-in con un título). */
+function esProyecto(c) {
+  try {
+    return /^\d{7} - ./.test(path.basename(c)) || fs.existsSync(path.join(c, '.px', 'tema.json'));
+  } catch {
+    return false;
+  }
+}
+
+/** Expediente o tema válido para abrir una sesión: carpeta que existe. Vacío = carpeta general. */
 function carpetaValida(c) {
   if (c === '') return true;
   if (typeof c !== 'string' || c.length > 1000 || !path.isAbsolute(c)) return false;
-  if (!/^\d{7} - ./.test(path.basename(c))) return false;
+  if (!esProyecto(c)) return false;
   try {
     return fs.statSync(c).isDirectory();
   } catch {
@@ -155,10 +164,15 @@ function carpetaValida(c) {
 
 /** Pide al plug-in que abra una sesión nueva (sin ventana) y espera a que la recoja: si no, PL/SQL Developer no está abierto. */
 async function pedirSesionNueva(carpeta) {
-  if (!carpetaValida(carpeta)) return { ok: false, error: 'Esa carpeta no es un expediente («1234567 - Título») que exista.' };
+  if (!carpetaValida(carpeta)) return { ok: false, error: 'Esa carpeta no es un expediente («1234567 - Título») ni un tema que exista.' };
+  return pedirAlPlugin({ accion: 'claude', carpeta, origen: 'panel' });
+}
+
+/** Deja una petición al plug-in y espera a que la recoja (como mucho 6 s): si no, PL/SQL Developer no está abierto. */
+async function pedirAlPlugin(datos) {
   fs.mkdirSync(PETICIONES, { recursive: true });
   const fichero = path.join(PETICIONES, `${Date.now()}-panel-${crypto.randomBytes(4).toString('hex')}.json`);
-  fs.writeFileSync(`${fichero}.tmp`, JSON.stringify({ accion: 'claude', carpeta, origen: 'panel' }));
+  fs.writeFileSync(`${fichero}.tmp`, JSON.stringify(datos));
   fs.renameSync(`${fichero}.tmp`, fichero);
   const hasta = Date.now() + 6000;
   while (Date.now() < hasta) {
@@ -237,6 +251,8 @@ function aplicarEventoMod(s, ev) {
       break;
     case 'turno':
       if (ev.subagente) break;
+      // Tras /clear la conversación cambia de id: el mod lo manda con cada turno
+      if (ev.sesion) m.claudeId = recortar(ev.sesion, 100);
       cambiar('trabajando', 'Pensando…');
       añadirEvento(s, { tipo: 'mensaje', texto: recortar(ev.texto, 500) || '(continúa)' });
       break;
@@ -393,7 +409,21 @@ async function atender(req, res) {
   // Para el plug-in (abrir.js): sesiones abiertas, pegar un texto en una y enseñarla en el panel
   if (ruta === '/api/sesiones' && req.method === 'GET') {
     if (!conClave(req)) return responder(res, 401, { error: 'sin permiso' });
-    return responder(res, 200, { sesiones: [...sesiones.values()].map(s => ({ id: s.id, titulo: s.titulo, carpeta: s.carpeta, viva: s.viva, sinVentana: s.sinVentana })) });
+    return responder(res, 200, {
+      sesiones: [...sesiones.values()].map(s => ({ id: s.id, titulo: s.titulo, carpeta: s.carpeta, viva: s.viva, sinVentana: s.sinVentana, claudeId: s.mod.claudeId })),
+    });
+  }
+  // Para el plug-in: cerrar una sesión (al asignarle un expediente, antes de llevarse su conversación)
+  const mc = /^\/api\/sesiones\/([A-Za-z0-9_-]{8,64})\/cerrar$/.exec(ruta);
+  if (mc && req.method === 'POST') {
+    if (!conClave(req)) return responder(res, 401, { error: 'sin permiso' });
+    const s = sesiones.get(mc[1]);
+    if (!s) return responder(res, 404, { error: 'sesión desconocida' });
+    if (s.host && s.viva) {
+      log('cerrar a petición del plug-in', s.id);
+      enviar(s.host, { t: 'cerrar' });
+    }
+    return responder(res, 200, { ok: true, viva: s.viva });
   }
   const mp = /^\/api\/sesiones\/([A-Za-z0-9_-]{8,64})\/pegar$/.exec(ruta);
   if (mp && req.method === 'POST') {
@@ -638,6 +668,16 @@ function conectarNavegador(ws) {
         pedirSesionNueva(typeof msg.carpeta === 'string' ? msg.carpeta.trim() : null)
           .catch(e => ({ ok: false, error: `No he podido pedir la sesión: ${e.message}` }))
           .then(r => enviar(ws, { t: 'nueva', ...r }));
+        break;
+      case 'asignar':
+        // Asignar un expediente o tema a la conversación: los cuadros de diálogo los enseña el plug-in
+        if (!s || !s.viva) {
+          enviar(ws, { t: 'asignar', ok: false, error: 'Esa sesión ya no está abierta.' });
+          break;
+        }
+        pedirAlPlugin({ accion: 'asignar', sesion: s.id, origen: 'panel' })
+          .catch(e => ({ ok: false, error: `No he podido pedirlo al plug-in: ${e.message}` }))
+          .then(r => enviar(ws, { t: 'asignar', ...r }));
         break;
       case 'cerrar':
         if (s && s.host && s.viva) {

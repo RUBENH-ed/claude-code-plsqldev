@@ -183,17 +183,63 @@ async function hasta(cond, ms, que) {
     assert.equal(respuesta.ok, true);
     console.log('ok  nueva sesión: petición al plug-in');
 
+    // 9b. Un tema (carpeta con .px/tema.json) vale como un expediente para abrir una sesión
+    respuesta = null;
+    const tema = path.join(expediente, 'Revisión de cierres');
+    fs.mkdirSync(path.join(tema, '.px'), { recursive: true });
+    fs.writeFileSync(path.join(tema, '.px', 'tema.json'), '{"titulo":"Revisión de cierres"}');
+    ws.send(JSON.stringify({ t: 'nueva', carpeta: tema }));
+    const peticionTema = await hasta(() => fs.existsSync(peticiones) && fs.readdirSync(peticiones).find(f => f.endsWith('.json')), 3000, 'petición del tema');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(peticiones, peticionTema), 'utf8')).carpeta, tema);
+    fs.unlinkSync(path.join(peticiones, peticionTema));
+    await hasta(() => respuesta, 3000, 'respuesta del tema');
+    assert.equal(respuesta.ok, true);
+    console.log('ok  nueva sesión en un tema');
+
+    // 9c. Lista para el plug-in, con el id de la conversación que manda el mod en cada turno; pegar por id
+    await avisar(claveMod, [{ tipo: 'turno', texto: 'sigue', sesion: 'conv-1234-abcd' }]);
+    const listaPlugin = await hasta(async () => {
+      const l = JSON.parse((await abrir('--lista')).out || '[]');
+      return l.find(s => s.id === sesion.id && s.claudeId === 'conv-1234-abcd') && l;
+    }, 3000, 'id de la conversación en la lista');
+    assert.ok(Array.isArray(listaPlugin));
+    fs.writeFileSync(fichero, 'echo POR_ID');
+    assert.equal((await abrir('--id', 'noexiste12345', '--pegar', fichero)).codigo, 3, 'sin sesión con ese id');
+    assert.equal((await abrir('--id', sesion.id, '--pegar', fichero)).codigo, 0);
+    await hasta(() => pantalla.includes('echo POR_ID'), 3000, 'texto pegado por id');
+    ws.send(JSON.stringify({ t: 'in', id: sesion.id, d: '\x15' }));
+    console.log('ok  lista de sesiones con su conversación y pegar por id');
+
+    // 9d. Asignar expediente: el servidor deja la petición al plug-in con la sesión
+    let asignar = null;
+    ws.on('message', m => {
+      const msg = JSON.parse(m);
+      if (msg.t === 'asignar') asignar = msg;
+    });
+    ws.send(JSON.stringify({ t: 'asignar', id: sesion.id }));
+    const peticionAsignar = await hasta(() => fs.existsSync(peticiones) && fs.readdirSync(peticiones).find(f => f.endsWith('.json')), 3000, 'petición de asignar');
+    const datosAsignar = JSON.parse(fs.readFileSync(path.join(peticiones, peticionAsignar), 'utf8'));
+    assert.equal(datosAsignar.accion, 'asignar');
+    assert.equal(datosAsignar.sesion, sesion.id);
+    fs.unlinkSync(path.join(peticiones, peticionAsignar));
+    await hasta(() => asignar, 3000, 'respuesta de asignar');
+    assert.equal(asignar.ok, true);
+    console.log('ok  asignar expediente: petición al plug-in');
+
     // 10. Preferencias guardadas en el equipo
-    ws.send(JSON.stringify({ t: 'prefs', prefs: { tema: 'claro', ventanas: 'ocultar' } }));
+    ws.send(JSON.stringify({ t: 'prefs', prefs: { tema: 'claro', ventanas: 'ocultar', mensajes: 'breves' } }));
     await hasta(() => fs.existsSync(path.join(DATOS, 'preferencias.json')), 3000, 'preferencias guardadas');
-    assert.equal(JSON.parse(fs.readFileSync(path.join(DATOS, 'preferencias.json'), 'utf8')).ventanas, 'ocultar');
+    const guardadas = JSON.parse(fs.readFileSync(path.join(DATOS, 'preferencias.json'), 'utf8'));
+    assert.equal(guardadas.ventanas, 'ocultar');
+    assert.equal(guardadas.mensajes, 'breves', 'el tipo de mensaje también lo lee el plug-in');
     console.log('ok  preferencias guardadas (las lee el plug-in)');
 
-    // 11. Cerrar desde el panel
-    ws.send(JSON.stringify({ t: 'cerrar', id: sesion.id }));
+    // 11. Cerrar como lo hace el plug-in al asignar un expediente: espera a que la sesión termine
+    const cierre = await abrir('--cerrar', sesion.id);
+    assert.equal(cierre.codigo, 0, 'abrir.js --cerrar espera a que termine');
     await hasta(() => lista.find(s => s.id === sesion.id && !s.viva), 5000, 'sesión cerrada');
     await hasta(() => salioAnfitrion !== null, 5000, 'el anfitrión termina');
-    console.log('ok  cerrar la sesión desde el panel');
+    console.log('ok  cerrar la sesión (plug-in)');
     ws.close();
     console.log('\nTodo bien.');
   } finally {

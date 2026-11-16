@@ -26,6 +26,11 @@ SoloWindows1252=si
 ; si = al abrir Claude retoma la última conversación de esa carpeta (cada expediente tiene la suya); no = empieza una nueva
 RetomarConversacion=si
 
+; si = al pasar una ventana o una BD a Claude, el mensaje explica qué se le pasa y qué tiene que hacer con ello;
+; no = solo la referencia (PACKAGE LIBRA.PK_X: @.px/ventanas/LIBRA.PK_X.pkb). Las instrucciones las tiene igualmente.
+; Si eliges el tipo de mensaje en el panel de sesiones (Personalizar), manda lo del panel.
+MensajesDetallados=si
+
 ; si = una sola ventana de Claude por carpeta, colocada como panel a la derecha de PL/SQL Developer. Si ya está
 ;      abierta, la trae al frente y te deja en el portapapeles la referencia de la ventana para pegarla (Ctrl+V).
 ; no = cada vez abre una ventana nueva, donde la coloque Windows.
@@ -873,6 +878,198 @@ declare module 'claude-code' {
 """;
 
     /// <summary>Módulo del mod: lee los índices de BBDD (nunca los .env) y los pinta encima del cuadro de escritura.</summary>
+    /// <summary>
+    /// Cuadro de diálogo del plug-in (elegir sesión, carpeta o tema; escribir un título; buscar una carpeta). Va en un
+    /// proceso aparte, con Windows Forms, porque Windows no trae un cuadro para escribir texto ni una lista con
+    /// columnas, y así nada de esto pasa por los ganchos del IDE. Entrada y salida en ficheros JSON (UTF-8).
+    /// </summary>
+    public const string Dialogo = """
+# Cuadro de dialogo del plug-in de Claude Code para PL/SQL Developer (lo escribe el plug-in; no hace falta tocarlo).
+# Uso: dialogo.ps1 <entrada.json> <salida.json>
+# Entrada: { titulo, texto, opciones: [{ id, texto, detalle }], predeterminada, campos: [{ id, etiqueta, valor, tipo
+#   (texto | carpeta), obligatorio, patron, mensaje, ayuda }], camposSiOpcion, aceptar }
+# Salida: { opcion, campos: { id: valor } }. Codigo de salida 0 = Aceptar, 1 = Cancelar.
+param([string]$Entrada, [string]$Salida)
+$ErrorActionPreference = 'Stop'
+$d = Get-Content -LiteralPath $Entrada -Raw -Encoding UTF8 | ConvertFrom-Json
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+[System.Windows.Forms.Application]::EnableVisualStyles()
+
+$ancho = 600
+$form = New-Object System.Windows.Forms.Form
+$form.Text = if ($d.titulo) { [string]$d.titulo } else { 'Claude Code' }
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.StartPosition = 'CenterScreen'
+$form.TopMost = $true
+$form.ShowInTaskbar = $true
+$form.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
+$form.AutoScaleMode = 'Dpi'
+$y = 14
+
+if ($d.texto) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = [string]$d.texto
+    $l.AutoSize = $true
+    $l.MaximumSize = New-Object System.Drawing.Size(($ancho - 30), 0)
+    $l.Location = New-Object System.Drawing.Point(14, $y)
+    $form.Controls.Add($l)
+    $y += $l.PreferredHeight + 10
+}
+
+$lista = $null
+$ids = @()
+if ($d.opciones -and @($d.opciones).Count -gt 0) {
+    $lista = New-Object System.Windows.Forms.ListView
+    $lista.View = 'Details'
+    $lista.FullRowSelect = $true
+    $lista.HideSelection = $false
+    $lista.MultiSelect = $false
+    $lista.HeaderStyle = 'None'
+    $lista.Location = New-Object System.Drawing.Point(14, $y)
+    $alto = [Math]::Min(260, [Math]::Max(90, 26 * @($d.opciones).Count + 8))
+    $lista.Size = New-Object System.Drawing.Size(($ancho - 30), $alto)
+    [void]$lista.Columns.Add('Opcion', 250)
+    [void]$lista.Columns.Add('Detalle', ($ancho - 30 - 254))
+    foreach ($o in $d.opciones) {
+        $item = New-Object System.Windows.Forms.ListViewItem([string]$o.texto)
+        [void]$item.SubItems.Add([string]$o.detalle)
+        $item.ToolTipText = [string]$o.detalle
+        [void]$lista.Items.Add($item)
+        $ids += [string]$o.id
+    }
+    $lista.ShowItemToolTips = $true
+    $pre = if ($null -ne $d.predeterminada) { [int]$d.predeterminada } else { 0 }
+    if ($pre -ge 0 -and $pre -lt $lista.Items.Count) { $lista.Items[$pre].Selected = $true; $lista.Items[$pre].Focused = $true }
+    $form.Controls.Add($lista)
+    $y += $alto + 12
+}
+
+$cajas = @{}
+$controlesCampos = @()
+foreach ($c in @($d.campos)) {
+    if (-not $c) { continue }
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = [string]$c.etiqueta
+    $l.AutoSize = $true
+    $l.Location = New-Object System.Drawing.Point(14, $y)
+    $form.Controls.Add($l)
+    $y += $l.PreferredHeight + 4
+    $t = New-Object System.Windows.Forms.TextBox
+    $t.Text = [string]$c.valor
+    $t.Location = New-Object System.Drawing.Point(14, $y)
+    $anchoCaja = if ($c.tipo -eq 'carpeta') { $ancho - 30 - 100 } else { $ancho - 30 }
+    $t.Size = New-Object System.Drawing.Size($anchoCaja, 26)
+    $form.Controls.Add($t)
+    $cajas[[string]$c.id] = $t
+    $controlesCampos += $l, $t
+    if ($c.tipo -eq 'carpeta') {
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = 'Examinar...'
+        $b.Location = New-Object System.Drawing.Point(($ancho - 16 - 92), ($y - 1))
+        $b.Size = New-Object System.Drawing.Size(92, 28)
+        $b.Tag = $t
+        $b.Add_Click({
+            param($s, $e)
+            $caja = $s.Tag
+            $fb = New-Object System.Windows.Forms.FolderBrowserDialog
+            $fb.Description = 'Elige la carpeta'
+            $fb.ShowNewFolderButton = $true
+            if ($caja.Text -and (Test-Path -LiteralPath $caja.Text)) { $fb.SelectedPath = $caja.Text }
+            if ($fb.ShowDialog($form) -eq 'OK') { $caja.Text = $fb.SelectedPath }
+        })
+        $form.Controls.Add($b)
+        $controlesCampos += $b
+    }
+    $y += 32
+    if ($c.ayuda) {
+        $a = New-Object System.Windows.Forms.Label
+        $a.Text = [string]$c.ayuda
+        $a.AutoSize = $true
+        $a.MaximumSize = New-Object System.Drawing.Size(($ancho - 30), 0)
+        $a.ForeColor = [System.Drawing.SystemColors]::GrayText
+        $a.Location = New-Object System.Drawing.Point(14, ($y - 4))
+        $form.Controls.Add($a)
+        $controlesCampos += $a
+        $y += $a.PreferredHeight + 6
+    }
+}
+
+$aviso = New-Object System.Windows.Forms.Label
+$aviso.ForeColor = [System.Drawing.Color]::Firebrick
+$aviso.AutoSize = $true
+$aviso.MaximumSize = New-Object System.Drawing.Size(($ancho - 30), 0)
+$aviso.Location = New-Object System.Drawing.Point(14, $y)
+$form.Controls.Add($aviso)
+$y += 26
+
+$ok = New-Object System.Windows.Forms.Button
+$ok.Text = if ($d.aceptar) { [string]$d.aceptar } else { 'Aceptar' }
+$ok.Size = New-Object System.Drawing.Size(110, 30)
+$ok.Location = New-Object System.Drawing.Point(($ancho - 16 - 110 - 8 - 110), $y)
+$cancel = New-Object System.Windows.Forms.Button
+$cancel.Text = 'Cancelar'
+$cancel.Size = New-Object System.Drawing.Size(110, 30)
+$cancel.Location = New-Object System.Drawing.Point(($ancho - 16 - 110), $y)
+$cancel.DialogResult = 'Cancel'
+$form.Controls.Add($ok)
+$form.Controls.Add($cancel)
+$form.AcceptButton = $ok
+$form.CancelButton = $cancel
+$form.ClientSize = New-Object System.Drawing.Size($ancho, ($y + 44))
+
+function Opcion-Elegida {
+    if (-not $lista) { return '' }
+    if ($lista.SelectedIndices.Count -eq 0) { return $null }
+    return $ids[$lista.SelectedIndices[0]]
+}
+
+# Los campos solo valen con una opcion concreta (por ejemplo, el titulo de un tema nuevo)
+function Ajustar-Campos {
+    if (-not $d.camposSiOpcion) { return }
+    $activos = (Opcion-Elegida) -eq [string]$d.camposSiOpcion
+    foreach ($ctl in $controlesCampos) { $ctl.Enabled = $activos }
+}
+if ($lista) {
+    $lista.Add_SelectedIndexChanged({ Ajustar-Campos })
+    $lista.Add_DoubleClick({ $ok.PerformClick() })
+}
+Ajustar-Campos
+
+$ok.Add_Click({
+    $opcion = Opcion-Elegida
+    if ($null -eq $opcion) { $aviso.Text = 'Elige una de las opciones.'; return }
+    $usar = (-not $d.camposSiOpcion) -or ($opcion -eq [string]$d.camposSiOpcion)
+    if ($usar) {
+        foreach ($c in @($d.campos)) {
+            if (-not $c) { continue }
+            $v = $cajas[[string]$c.id].Text.Trim()
+            if ($c.obligatorio -and -not $v) { $aviso.Text = "Falta: $($c.etiqueta)"; $cajas[[string]$c.id].Focus(); return }
+            if ($v -and $c.patron -and $v -notmatch [string]$c.patron) {
+                $aviso.Text = if ($c.mensaje) { [string]$c.mensaje } else { "No vale: $($c.etiqueta)" }
+                $cajas[[string]$c.id].Focus(); return
+            }
+            if ($v -and $c.tipo -eq 'carpeta' -and -not (Test-Path -LiteralPath $v -PathType Container)) {
+                $aviso.Text = "No existe la carpeta $v"; $cajas[[string]$c.id].Focus(); return
+            }
+        }
+    }
+    $form.DialogResult = 'OK'
+    $form.Close()
+})
+
+$form.Add_Shown({ $form.Activate(); if ($lista) { $lista.Focus() } elseif ($cajas.Count -gt 0) { @($cajas.Values)[0].Focus() } })
+if ($form.ShowDialog() -ne 'OK') { exit 1 }
+
+$valores = @{}
+foreach ($k in $cajas.Keys) { $valores[$k] = $cajas[$k].Text.Trim() }
+$res = @{ opcion = (Opcion-Elegida); campos = $valores } | ConvertTo-Json -Compress
+[System.IO.File]::WriteAllText($Salida, $res, (New-Object System.Text.UTF8Encoding($false)))
+exit 0
+""";
+
     public const string ModRegister = """
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -1017,6 +1214,12 @@ export const register: Register = on => {
         // Tres pilotos (trabajando, te espera, pide permiso), como en el propio panel; botón grande
         (Plugin.MenuSessions, "Panel de sesiones",
             Svg("""<rect x="1.5" y="2.5" width="18" height="16" rx="2.5" fill="none" stroke="#434A54" stroke-width="1.3"/><rect x="5" y="6" width="2.6" height="9" rx="1.3" fill="#E9B44C"/><rect x="9.2" y="6" width="2.6" height="9" rx="1.3" fill="#27AE60"/><rect x="13.4" y="6" width="2.6" height="9" rx="1.3" fill="#EB5757"/>""", 37)),
+        // Dos ventanas con una flecha: abrir la ventana activa en la sesión de Claude que se elija
+        (Plugin.MenuOpenIn, "Elegir ventana de Claude",
+            Svg("""<rect x="2.5" y="4.5" width="9" height="11" rx="1" fill="none" stroke="#434A54"/><rect x="11" y="7.5" width="7.5" height="9" rx="1" fill="none" stroke="#D97757"/><path d="M6 10h8M12 8l2 2-2 2" fill="none" stroke="#2F80ED" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>""")),
+        // Carpeta con una etiqueta: la conversación pasa a un expediente
+        (Plugin.MenuAssign, "Asignar expediente",
+            Svg("""<path d="M2.5 6v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H10L8.5 5h-5a1 1 0 0 0-1 1z" fill="none" stroke="#434A54"/><path d="M10.5 9.5v5M8 12h5" stroke="#27AE60" stroke-width="1.6" stroke-linecap="round"/>""")),
         (Plugin.MenuHelp, "Ayuda",
             Svg("""<circle cx="10.5" cy="10.5" r="7.5" fill="none" stroke="#434A54" stroke-width="1.4"/><path d="M8.2 8.2a2.3 2.3 0 1 1 3.3 2.1c-.6.3-1 .8-1 1.4v.5" fill="none" stroke="#2F80ED" stroke-width="1.6" stroke-linecap="round"/><circle cx="10.5" cy="14.6" r="1" fill="#2F80ED"/>""")),
         (Plugin.MenuInstall, "Preparar instalación",

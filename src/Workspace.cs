@@ -13,17 +13,96 @@ namespace ClaudeCodePlsql;
 internal sealed class Workspace
 {
     public string Root { get; }
+
+    /// <summary>Expediente o tema: carpeta con su propia conversación de Claude, sus copias en .px y sus BBDD.</summary>
     public bool IsProject { get; }
+
+    /// <summary>Tema: una carpeta con título que no es un expediente (la marca .px\tema.json), creada desde el plug-in.</summary>
+    public bool IsTopic { get; }
 
     private Workspace(string root, bool isProject)
     {
         Root = root.Length > 3 ? root.TrimEnd('\\', '/') : root;
         IsProject = isProject;
+        IsTopic = isProject && !IsProjectFolderName(Path.GetFileName(Root));
     }
 
     public static Workspace General(string folder) => new(folder, false);
 
+    /// <summary>Expediente («1234567 - Título») o tema (carpeta con .px\tema.json).</summary>
     public static Workspace Project(string root) => new(root, true);
+
+    /// <summary>Marca de un tema, dentro de su carpeta.</summary>
+    public static string TopicMarker(string root) => Path.Combine(root, ".px", "tema.json");
+
+    public static bool IsTopicFolder(string dir)
+    {
+        try
+        {
+            return File.Exists(TopicMarker(dir));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>True si la carpeta es un expediente o un tema.</summary>
+    public static bool IsProjectFolder(string dir) =>
+        IsProjectFolderName(Path.GetFileName(dir.TrimEnd('\\', '/'))) || IsTopicFolder(dir);
+
+    /// <summary>
+    /// Carpeta de una sesión de Claude: expediente o tema si lo es; si no, carpeta general (la de CarpetaTrabajo u otra).
+    /// </summary>
+    public static Workspace FromFolder(string folder, string general)
+    {
+        string f = folder.Trim().TrimEnd('\\', '/');
+        if (f.Length == 0) return General(general);
+        return IsProjectFolder(f) ? Project(f) : General(f);
+    }
+
+    /// <summary>«expediente» o «tema», para los textos.</summary>
+    public string Kind => IsTopic ? "tema" : "expediente";
+
+    /// <summary>Nombre de carpeta válido en Windows: sin \ / : * ? " &lt; &gt; |, sin espacios dobles ni punto o espacio final.</summary>
+    public static string FolderName(string text)
+    {
+        var sb = new StringBuilder(text.Length);
+        foreach (char c in text.Trim())
+            sb.Append(c is '\\' or '/' or ':' or '*' or '?' or '"' or '<' or '>' or '|' || char.IsControl(c) ? ' ' : c);
+        string name = System.Text.RegularExpressions.Regex.Replace(sb.ToString(), " {2,}", " ").TrimEnd(' ', '.').Trim();
+        return name.Length > 120 ? name[..120].TrimEnd(' ', '.') : name;
+    }
+
+    /// <summary>
+    /// Crea (o completa, si ya existe) un expediente «1234567 - Título» con la estructura estándar, o un tema con su
+    /// carpeta doc y la marca .px\tema.json si no hay número. Devuelve la carpeta.
+    /// </summary>
+    public static Workspace Create(string parent, string number, string title)
+    {
+        number = number.Trim();
+        string name = FolderName(number.Length > 0 ? $"{number} - {title}" : title);
+        if (name.Length == 0) throw new ArgumentException("El título no puede quedar vacío.");
+        string root = Path.Combine(parent, name);
+        if (number.Length > 0)
+        {
+            foreach (string d in new[] { @"cfcliente\cfsubidos", @"cfcliente\prog_estandar\cfsubidos", @"cfstd\cfsubidos", "doc",
+                         @"instalacion\libraupdate", @"instalacion\manual", "test" })
+                Directory.CreateDirectory(Path.Combine(root, d));
+        }
+        else
+        {
+            Directory.CreateDirectory(Path.Combine(root, "doc"));
+            Directory.CreateDirectory(Path.Combine(root, ".px"));
+            if (!File.Exists(TopicMarker(root)))
+            {
+                string json = "{\"titulo\":\"" + System.Text.Json.JsonEncodedText.Encode(title.Trim()) + "\"," +
+                              $"\"creado\":\"{DateTime.Now:yyyy-MM-dd HH:mm}\"}}";
+                File.WriteAllText(TopicMarker(root), json, new UTF8Encoding(false));
+            }
+        }
+        return Project(root);
+    }
 
     /// <summary>Copias de las ventanas: .px\ventanas en un expediente (junto a px.py), ventanas en la carpeta general.</summary>
     public string WindowsDir => IsProject ? Path.Combine(Root, ".px", "ventanas") : Path.Combine(Root, "ventanas");
@@ -37,8 +116,8 @@ internal sealed class Workspace
     /// <summary>Nombre de la carpeta: «1234567 - Título» en un expediente.</summary>
     public string Label => Path.GetFileName(Root);
 
-    /// <summary>Número de expediente (7 dígitos) o vacío.</summary>
-    public string Number => IsProject ? Label[..7] : "";
+    /// <summary>Número de expediente (7 dígitos) o vacío (también en un tema).</summary>
+    public string Number => IsProject && !IsTopic ? Label[..7] : "";
 
     public bool SameAs(Workspace other) =>
         IsProject == other.IsProject && Root.Equals(other.Root, StringComparison.OrdinalIgnoreCase);
@@ -61,7 +140,7 @@ internal sealed class Workspace
             string? dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
             while (!string.IsNullOrEmpty(dir))
             {
-                if (IsProjectFolderName(Path.GetFileName(dir))) return dir;
+                if (IsProjectFolderName(Path.GetFileName(dir)) || IsTopicFolder(dir)) return dir;
                 string? parent = Path.GetDirectoryName(dir);
                 if (string.IsNullOrEmpty(parent) || parent == dir) break;
                 dir = parent;
@@ -149,12 +228,12 @@ internal static class Prompts
 
     /// <summary>Sesión abierta con el botón «Nueva sesión» del panel, sin ninguna ventana del IDE.</summary>
     public static string FromPanel(Workspace ws) =>
-        Marker + (ws.IsProject ? $" en el expediente {ws.Label}." : ", fuera de cualquier expediente.") +
+        Marker + (ws.IsProject ? $" en el {ws.Kind} {ws.Label}." : ", fuera de cualquier expediente.") +
         " Me la he abierto desde el panel de sesiones, sin ninguna ventana concreta." + End(ws) + " Espera mis instrucciones.";
 
     /// <summary>Encargo sobre el expediente entero, sin una ventana concreta.</summary>
     public static string ProjectTask(Workspace ws, string task) =>
-        $"{Marker} en el expediente {ws.Label}.{End(ws)} {task}";
+        $"{Marker} en el {ws.Kind} {ws.Label}.{End(ws)} {task}";
 
     /// <summary>Texto para pegar en una ventana de Claude que ya estaba abierta.</summary>
     public static string Again(string title, string copy, string connection, (string Path, int Line)? selection)
@@ -177,7 +256,7 @@ internal static class Prompts
     private static StringBuilder Start(Workspace ws, string title, string connection)
     {
         var sb = new StringBuilder(Marker);
-        sb.Append(ws.IsProject ? $" en el expediente {ws.Label}." : ", fuera de cualquier expediente.");
+        sb.Append(ws.IsProject ? $" en el {ws.Kind} {ws.Label}." : ", fuera de cualquier expediente.");
         sb.Append($" Ventana: {title}{connection}.");
         return sb;
     }
@@ -188,7 +267,47 @@ internal static class Prompts
             : $" Fichero original: {original} (no lo edites: los cambios le llegan cuando los guardo en PL/SQL Developer).";
 
     private static string End(Workspace ws) =>
+        ws.IsTopic ? " Es un tema con título, no un expediente: su documentación va en doc." :
         ws.IsProject ? " Si tienes la skill proyecto-expediente, úsala para el seguimiento de este expediente." : "";
+
+    /// <summary>
+    /// Mensaje breve al pasar una ventana (preferencia «mensajes breves»): solo qué ventana es y su copia, y la
+    /// selección si la hay. Lo que tiene que hacer Claude con ella va en <see cref="WindowRule"/>, en el prompt de sistema.
+    /// </summary>
+    public static string Short(string title, string copy, string connection, (string Path, int Line)? selection = null)
+    {
+        var sb = new StringBuilder($"{title}{connection}: @{copy.Replace('\\', '/')}");
+        if (selection is { } s)
+        {
+            sb.Append($", selección en @{s.Path.Replace('\\', '/')}");
+            if (s.Line > 0) sb.Append($" (línea {s.Line})");
+            return sb.Append(". Espera mi pregunta.").ToString();
+        }
+        return sb.Append(". Espera mis instrucciones.").ToString();
+    }
+
+    /// <summary>Encargo de un botón de Herramientas en breve: la ventana y la tarea.</summary>
+    public static string ShortTask(string title, string copy, string connection, string task) =>
+        $"{title}{connection}: @{copy.Replace('\\', '/')}. {task}";
+
+    /// <summary>
+    /// Lo que Claude tiene que saber de las ventanas que le pasa el plug-in. Va siempre en el prompt de sistema de la
+    /// sesión (no se ve en la conversación), para que los mensajes breves basten.
+    /// </summary>
+    public static string WindowRule(Workspace ws) =>
+        Marker + (ws.IsProject ? $", en el {ws.Kind} {ws.Label}." : ", fuera de cualquier expediente.") +
+        " Las ventanas de PL/SQL Developer te llegan como una referencia @ a su copia UTF-8 (en " +
+        (ws.IsProject ? ".px\\ventanas" : "ventanas") + "), a veces con la conexión de la ventana y, si el usuario " +
+        "seleccionó un trozo, con un fichero .seleccion aparte. Si te pide cambios, edita esa copia y nada más (nunca el " +
+        "fichero .seleccion ni el fichero original de la ventana): el plug-in carga los cambios en el editor y el usuario " +
+        "revisa, compila y guarda desde PL/SQL Developer. Si solo te pasa una ventana, léela y espera sus instrucciones." +
+        End(ws);
+
+    /// <summary>Sesión reabierta en el expediente o tema que se le acaba de asignar (retoma la misma conversación).</summary>
+    public static string Assigned(Workspace ws, string from) =>
+        $"{Marker} en el {ws.Kind} {ws.Label}. Esta conversación venía de {from} y la he asignado a este {ws.Kind}: " +
+        "desde ahora trabajas en esta carpeta (las copias de las ventanas de PL/SQL Developer van en .px\\ventanas)." +
+        End(ws) + " Sigue donde lo dejamos.";
 }
 
 /// <summary>Comprobación de que un texto se puede guardar en Windows-1252, la codificación de los fuentes de LIBRA.</summary>

@@ -13,7 +13,7 @@ namespace ClaudeCodePlsql;
 internal static class Help
 {
     /// <summary>Cambia cuando la ayuda trae algo nuevo que conviene que todos vean una vez.</summary>
-    private const string Version = "1.8";
+    private const string Version = "1.9";
 
     private static string FilePath => Path.Combine(Config.Dir, "ayuda.html");
     private static string SeenPath => Path.Combine(Config.Dir, "ayuda-vista.txt");

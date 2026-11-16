@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -62,8 +63,96 @@ internal static unsafe partial class Win32
     [LibraryImport("kernel32.dll")]
     private static partial nint GlobalFree(nint hMem);
 
-    public static int Message(string text, uint flags) =>
-        MessageBoxW(Ide.MainWindow, text, "Claude Code", flags);
+    /// <summary>
+    /// Mensaje con botones. Se muestra desde un hilo propio y el del IDE sigue atendiendo sus mensajes mientras tanto:
+    /// PL/SQL Developer engancha (con un hook de su hilo) los cuadros de diálogo que se abren en él para pintarlos con
+    /// su tema, y a veces el texto del mensaje se quedaba en blanco (solo el icono y los botones). Desde otro hilo
+    /// el cuadro es el de Windows tal cual. La ventana del IDE queda deshabilitada, como con un mensaje normal.
+    /// </summary>
+    public static int Message(string text, uint flags)
+    {
+        nint owner = Ide.MainWindow;
+        int result = IDCANCEL;
+        using var done = new ManualResetEvent(false);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                result = MessageBoxW(owner, text, "Claude Code", flags | MB_SETFOREGROUND);
+            }
+            catch
+            {
+                // nunca dejar escapar una excepción del hilo
+            }
+            finally
+            {
+                try { done.Set(); } catch { } // si el IDE se está cerrando, el evento puede estar ya liberado
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        PumpUntil(done.SafeWaitHandle.DangerousGetHandle());
+        return result;
+    }
+
+    private const uint MB_SETFOREGROUND = 0x10000;
+    private const uint QS_ALLINPUT = 0x04FF;
+    private const uint PM_REMOVE = 0x0001;
+    private const uint WAIT_OBJECT_0 = 0;
+    private const uint WM_QUIT = 0x0012;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG { public nint hwnd; public uint message; public nuint wParam; public nint lParam; public uint time; public int x, y; }
+
+    [LibraryImport("user32.dll")]
+    private static partial uint MsgWaitForMultipleObjects(uint count, nint* handles, int waitAll, uint milliseconds, uint wakeMask);
+
+    [LibraryImport("user32.dll", EntryPoint = "PeekMessageW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool PeekMessage(MSG* msg, nint hWnd, uint min, uint max, uint remove);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool TranslateMessage(MSG* msg);
+
+    [LibraryImport("user32.dll", EntryPoint = "DispatchMessageW")]
+    private static partial nint DispatchMessage(MSG* msg);
+
+    [LibraryImport("user32.dll")]
+    private static partial void PostQuitMessage(int code);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EnableWindow(nint hWnd, [MarshalAs(UnmanagedType.Bool)] bool enable);
+
+    /// <summary>
+    /// Espera a que se señale el objeto sin bloquear el hilo del IDE: mientras tanto le pasa sus mensajes, como hace un
+    /// cuadro de diálogo modal (así PL/SQL Developer se repinta y Windows no lo da por colgado).
+    /// </summary>
+    /// <returns>True si el objeto se ha señalado; false si se acaba el tiempo o hay un error.</returns>
+    public static bool PumpUntil(nint handle, int timeoutMs = -1)
+    {
+        MSG msg;
+        long until = timeoutMs < 0 ? long.MaxValue : Environment.TickCount64 + timeoutMs;
+        while (true)
+        {
+            long left = until == long.MaxValue ? 0xFFFFFFFF : Math.Max(0, until - Environment.TickCount64);
+            uint r = MsgWaitForMultipleObjects(1, &handle, 0, (uint)left, QS_ALLINPUT);
+            if (r == WAIT_OBJECT_0) return true;
+            if (r != WAIT_OBJECT_0 + 1) return false; // se acabó el tiempo o error: no esperar más
+            while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
+            {
+                if (msg.message == WM_QUIT)
+                {
+                    PostQuitMessage((int)msg.wParam); // que lo vea el bucle principal del IDE
+                    return false;
+                }
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+    }
 
     /// <summary>True si la ventana en primer plano pertenece a PL/SQL Developer (este proceso).</summary>
     public static bool IsOurProcessInForeground()
@@ -220,6 +309,42 @@ internal static unsafe partial class Win32
             // nunca dejar escapar una excepción a Windows
         }
         return 1;
+    }
+
+    private static List<string>? _titles;
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    private static int EnumTitlesProc(nint hWnd, nint lParam)
+    {
+        try
+        {
+            if (!IsWindowVisible(hWnd)) return 1;
+            uint pid = 0;
+            GetWindowThreadProcessId(hWnd, &pid);
+            if (pid == (uint)Environment.ProcessId) return 1;
+            int len = GetWindowTextLengthW(hWnd);
+            if (len <= 0 || len > 1000) return 1;
+            char* buf = stackalloc char[len + 1];
+            int n = GetWindowTextW(hWnd, buf, len + 1);
+            string title = new(buf, 0, n);
+            if (title.Contains(_findText, StringComparison.OrdinalIgnoreCase)) _titles?.Add(title);
+        }
+        catch
+        {
+            // nunca dejar escapar una excepción a Windows
+        }
+        return 1;
+    }
+
+    /// <summary>Títulos de las ventanas visibles de otros programas que contienen el texto.</summary>
+    public static List<string> FindTopWindowTitles(string titlePart)
+    {
+        _findText = titlePart;
+        _titles = new List<string>();
+        EnumWindows((nint)(delegate* unmanaged[Stdcall]<nint, nint, int>)&EnumTitlesProc, 0);
+        var list = _titles;
+        _titles = null;
+        return list;
     }
 
     /// <summary>Ventana visible de otro programa cuyo título contiene el texto, o 0.</summary>

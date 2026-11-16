@@ -48,6 +48,7 @@
     caja: true,
     letra: 14,
     ventanas: 'mostrar',
+    mensajes: 'auto',
     colores: {},
   };
   let prefs = { ...DEFECTO };
@@ -64,6 +65,7 @@
     r.lista = elige(r.lista, 'izquierda', 'arriba', 'derecha');
     r.actividad = elige(r.actividad, 'derecha', 'abajo', 'izquierda');
     r.ventanas = elige(r.ventanas, 'mostrar', 'ocultar');
+    r.mensajes = elige(r.mensajes, 'auto', 'detallados', 'breves');
     r.listaPlegada = !!r.listaPlegada;
     r.actividadPlegada = !!r.actividadPlegada;
     r.caja = r.caja !== false;
@@ -364,6 +366,9 @@
       case 'nueva':
         resultadoNueva(msg);
         break;
+      case 'asignar':
+        resultadoAsignar(msg);
+        break;
       case 'snap':
         for (const v of vistasDe(msg.id)) {
           // Una foto final vacía (la terminal se cerró de golpe) no borra lo que ya se veía
@@ -496,6 +501,8 @@
     }
     const viva = !!(s && s.viva);
     $('btn-esc').disabled = !viva;
+    $('btn-pegar').disabled = !viva;
+    $('btn-asignar').disabled = !viva || asignando;
     $('btn-cerrar').hidden = !!s && !viva;
     $('btn-cerrar').disabled = !viva;
     $('btn-olvidar').hidden = !s || viva;
@@ -636,6 +643,61 @@
     principal.term.focus();
   });
 
+  // Pegar: muchas veces Ctrl+V no llega a la terminal (o el foco está en otro sitio). Si lo copiado es texto, se pega
+  // con las marcas de pegado; si no hay texto (una captura, por ejemplo), Alt+V para que Claude lea él mismo la imagen
+  // del portapapeles de Windows, como hace al pulsarlo en su ventana.
+  function avisoBreve(texto) {
+    const r = $('resumen-estado');
+    r.textContent = texto;
+    anunciar(texto);
+    clearTimeout(avisoBreve.t);
+    avisoBreve.t = setTimeout(() => pintarLista(), 6000);
+  }
+
+  $('btn-pegar').addEventListener('click', async () => {
+    const id = principal.id;
+    const s = sesiones.get(id);
+    if (!s || !s.viva) return;
+    let texto = null;
+    try {
+      texto = await navigator.clipboard.readText();
+    } catch {
+      texto = null; // el navegador no deja leer el portapapeles
+    }
+    if (texto === null) {
+      avisoBreve('El navegador no me deja leer el portapapeles: pega con Ctrl+V en la caja de abajo.');
+      mensaje.focus();
+      return;
+    }
+    if (texto) {
+      principal.term.paste(texto.replace(/\r\n/g, '\n'));
+      avisoBreve(`Pegado (${texto.length} caracteres). Revísalo y pulsa Intro.`);
+    } else {
+      enviar({ t: 'in', id, d: '\x1bv' });
+      avisoBreve('Sin texto copiado: le he pedido a Claude que pegue la imagen del portapapeles (Alt+V).');
+    }
+    principal.term.focus();
+  });
+
+  // Asignar expediente: los cuadros (número, título, carpeta) los enseña PL/SQL Developer
+  let asignando = false;
+  $('btn-asignar').addEventListener('click', () => {
+    const s = sesiones.get(seleccion);
+    if (!s || !s.viva) return;
+    asignando = true;
+    $('btn-asignar').disabled = true;
+    $('btn-asignar').textContent = 'Esperando a PL/SQL Developer…';
+    enviar({ t: 'asignar', id: s.id });
+  });
+
+  function resultadoAsignar(r) {
+    asignando = false;
+    $('btn-asignar').textContent = 'Asignar expediente';
+    pintarCabecera();
+    if (r.ok) avisoBreve('Contesta en PL/SQL Developer: número, título y carpeta del expediente o tema.');
+    else alert(r.error || 'No se ha podido asignar el expediente.');
+  }
+
   $('btn-cerrar').addEventListener('click', () => {
     const s = sesiones.get(seleccion);
     if (!s) return;
@@ -695,8 +757,10 @@
     const opciones = [];
     // Primero el expediente de la sesión elegida, luego los recientes
     const elegida = sesiones.get(seleccion);
+    // Expedientes («1234567 - Título») y temas (el servidor los marca como proyecto en el historial)
+    const proyectos = new Set(historial.filter(h => h.proyecto).map(h => h.carpeta.toLowerCase()));
     for (const c of [elegida?.carpeta, ...historial.map(h => h.carpeta)]) {
-      if (!c || vistasCarpetas.has(c.toLowerCase()) || !/^\d{7} - ./.test(nombreCarpeta(c))) continue;
+      if (!c || vistasCarpetas.has(c.toLowerCase()) || !(/^\d{7} - ./.test(nombreCarpeta(c)) || proyectos.has(c.toLowerCase()))) continue;
       vistasCarpetas.add(c.toLowerCase());
       opciones.push(c);
     }
@@ -770,7 +834,7 @@
   const formAjustes = $('form-ajustes');
 
   function pintarAjustes() {
-    for (const nombre of ['lista', 'actividad', 'ventanas', 'tema']) {
+    for (const nombre of ['lista', 'actividad', 'ventanas', 'mensajes', 'tema']) {
       const r = formAjustes.querySelector(`input[name="${nombre}"][value="${prefs[nombre]}"]`);
       if (r) r.checked = true;
     }
@@ -809,7 +873,7 @@
   formAjustes.addEventListener('change', e => {
     const t = e.target;
     if (t.name === 'tema') cambiarPrefs({ tema: t.value, colores: {} });
-    else if (['lista', 'actividad', 'ventanas'].includes(t.name)) cambiarPrefs({ [t.name]: t.value });
+    else if (['lista', 'actividad', 'ventanas', 'mensajes'].includes(t.name)) cambiarPrefs({ [t.name]: t.value });
     else if (t.name === 'caja') cambiarPrefs({ caja: t.checked });
     if (t.name === 'tema') pintarAjustes();
   });

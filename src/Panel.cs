@@ -147,21 +147,35 @@ internal static class Panel
     /// Preferencia del panel «Ventanas de Windows Terminal: ocultar»: las sesiones se abren sin ventana y solo se ven en
     /// el panel. La guarda el propio panel en %APPDATA%\ClaudeCodePlsql\panel\preferencias.json.
     /// </summary>
-    public static bool HideWindows()
+    public static bool HideWindows() => Preference("ventanas") == "ocultar";
+
+    /// <summary>
+    /// Mensajes breves al pasar una ventana o una BD a Claude: lo que se eligió en Personalizar del panel (mensajes:
+    /// breves | detallados) o, si no se ha elegido ahí, MensajesDetallados del ClaudeCode.ini.
+    /// </summary>
+    public static bool BriefMessages() => Preference("mensajes") switch
+    {
+        "breves" => true,
+        "detallados" => false,
+        _ => !Config.DetailedMessages,
+    };
+
+    /// <summary>Una preferencia de texto del panel (%APPDATA%\ClaudeCodePlsql\panel\preferencias.json), o "".</summary>
+    private static string Preference(string name)
     {
         try
         {
             string file = Path.Combine(Config.Dir, "panel", "preferencias.json");
-            if (!File.Exists(file)) return false;
+            if (!File.Exists(file)) return "";
             using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file, Encoding.UTF8));
             return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                   doc.RootElement.TryGetProperty("ventanas", out var v) &&
-                   v.ValueKind == System.Text.Json.JsonValueKind.String && v.GetString() == "ocultar";
+                   doc.RootElement.TryGetProperty(name, out var v) &&
+                   v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
         }
         catch (Exception e)
         {
             Log.Error(e);
-            return false;
+            return "";
         }
     }
 
@@ -189,6 +203,77 @@ internal static class Panel
         finally
         {
             if (file != null) try { File.Delete(file); } catch { }
+        }
+    }
+
+    /// <summary>Sesiones vivas del panel (node abrir.js --lista), o null si no se ha podido preguntar.</summary>
+    public static System.Collections.Generic.List<Session>? ListSessions((string Node, string Dir) panel)
+    {
+        var (exit, output, error) = Run(panel.Node, $"{Arg(Path.Combine(panel.Dir, "abrir.js"))} --lista", panel.Dir, 10_000);
+        if (exit != 0)
+        {
+            Log.Info($"No he podido pedir la lista de sesiones al panel: {error}");
+            return null;
+        }
+        try
+        {
+            var list = new System.Collections.Generic.List<Session>();
+            using var doc = System.Text.Json.JsonDocument.Parse(output);
+            foreach (var s in doc.RootElement.EnumerateArray())
+            {
+                string P(string n) => s.TryGetProperty(n, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString()! : "";
+                bool viva = s.TryGetProperty("viva", out var vv) && vv.ValueKind == System.Text.Json.JsonValueKind.True;
+                bool oculta = s.TryGetProperty("sinVentana", out var sv) && sv.ValueKind == System.Text.Json.JsonValueKind.True;
+                if (viva) list.Add(new Session(P("id"), P("titulo"), P("carpeta"), oculta, P("claudeId")));
+            }
+            return list;
+        }
+        catch (Exception e)
+        {
+            Log.Error(e);
+            return null;
+        }
+    }
+
+    /// <summary>Deja el texto escrito (sin enviarlo) en la sesión del panel con ese id y la enseña. True si estaba abierta.</summary>
+    public static bool PasteTo((string Node, string Dir) panel, string id, string text, string tempDir)
+    {
+        string? file = null;
+        try
+        {
+            string args = $"{Arg(Path.Combine(panel.Dir, "abrir.js"))} --id {Arg(id)}";
+            if (text.Length > 0)
+            {
+                Directory.CreateDirectory(tempDir);
+                file = Path.Combine(tempDir, $"pegar-{DateTime.Now:yyyyMMdd-HHmmss-fff}.txt");
+                File.WriteAllText(file, text, new UTF8Encoding(false));
+                args += $" --pegar {Arg(file)}";
+            }
+            var (exit, _, error) = Run(panel.Node, args, panel.Dir, 15_000);
+            if (exit != 0 && exit != 3) Log.Info($"No he podido dejar el texto en la sesión {id} del panel: {error}");
+            return exit == 0;
+        }
+        finally
+        {
+            if (file != null) try { File.Delete(file); } catch { }
+        }
+    }
+
+    /// <summary>Cierra la sesión del panel con ese id y espera (como mucho 20 s) a que termine. True si ha terminado.</summary>
+    public static bool Close((string Node, string Dir) panel, string id)
+    {
+        // Puede tardar unos segundos: el IDE queda deshabilitado pero sigue repintándose
+        nint ide = Ide.MainWindow;
+        if (ide != 0) Win32.EnableWindow(ide, false);
+        try
+        {
+            var (exit, _, error) = Run(panel.Node, $"{Arg(Path.Combine(panel.Dir, "abrir.js"))} --cerrar {Arg(id)}", panel.Dir, 25_000, pump: true);
+            if (exit != 0) Log.Info($"No he podido cerrar la sesión {id} del panel: {error}");
+            return exit == 0;
+        }
+        finally
+        {
+            if (ide != 0) Win32.EnableWindow(ide, true);
         }
     }
 
@@ -227,7 +312,8 @@ internal static class Panel
         return sb.ToString();
     }
 
-    private static (int Exit, string Output, string Error) Run(string exe, string args, string dir, int timeoutMs)
+    /// <param name="pump">Esperar atendiendo los mensajes del IDE (solo con su ventana deshabilitada).</param>
+    private static (int Exit, string Output, string Error) Run(string exe, string args, string dir, int timeoutMs, bool pump = false)
     {
         try
         {
@@ -238,11 +324,14 @@ internal static class Panel
                 WorkingDirectory = dir,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
             };
             using Process proc = Process.Start(psi)!;
             var output = proc.StandardOutput.ReadToEndAsync();
             var error = proc.StandardError.ReadToEndAsync();
-            if (!proc.WaitForExit(timeoutMs))
+            if (pump) Win32.PumpUntil(proc.Handle, timeoutMs);
+            if (!proc.WaitForExit(pump ? 0 : timeoutMs))
             {
                 try { proc.Kill(); } catch { }
                 return (-1, "", $"{Path.GetFileName(exe)} no ha terminado en {timeoutMs / 1000} s.");

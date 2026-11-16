@@ -1,5 +1,32 @@
 # Cambios
 
+## 1.9 (EDISA)
+
+- **Temas: abrir algo que no es un expediente con un título.** Cuando la ventana no es de ningún expediente (desde la
+  base de datos o sin guardar), el plug-in pregunta dónde abrirla en una lista: expedientes y temas recientes, carpeta
+  general o *Nuevo con título*. Con un título y la carpeta (selector de Windows) se crea un tema con su `doc` y la marca
+  `.px\tema.json`; con número de 7 cifras, un expediente con su estructura. Un tema funciona como un expediente: su
+  conversación, sus BBDD y vuelve a salir en la lista. Lo que se guarde en su carpeta se abre ya en él.
+- **Elegir ventana de Claude** (cinta, grupo *Sesiones*): abre la ventana activa, guardada o no, en la sesión de Claude
+  que se elija de las abiertas o en una sesión nueva (aquí o en otra carpeta). Si ya había una en esa carpeta, la nueva
+  lleva su propio título (`... (2)`) y su propia conversación.
+- **Conectar a BBDD pregunta a qué sesión**: con varias sesiones abiertas, se elige a cuál se conecta (por defecto la de
+  la carpeta de la ventana) y el aviso le llega a esa sesión.
+- **Asignar expediente** (cinta y panel): una conversación empezada fuera de un expediente pasa a uno (nuevo o
+  existente) o a un tema. Se elige la carpeta con el selector de Windows; la sesión se cierra, su conversación se mueve
+  a la carpeta nueva (`%USERPROFILE%\.claude\projects`) y se reabre allí retomándola.
+- **Aviso en blanco al cargar cambios de Claude, arreglado**: los mensajes del plug-in se enseñan desde un hilo propio,
+  fuera de los ganchos con los que PL/SQL Developer pinta sus cuadros de diálogo, que a veces dejaban el texto vacío.
+- **Mensajes breves al pasar una ventana o una BD**: en *Personalizar* del panel (*Mensaje al pasar una ventana o una
+  BD a Claude*) o con `MensajesDetallados=no` en `ClaudeCode.ini`, el mensaje lleva solo la referencia
+  (`PACKAGE LIBRA.PK_X (conexión u@bd): @.px/ventanas/LIBRA.PK_X.pkb. Espera mis instrucciones.`). Lo que Claude tiene
+  que hacer con las ventanas (editar solo la copia, no tocar el original...) va ahora siempre en el prompt de sistema
+  de cada sesión, que no se ve en la conversación.
+- **Panel: botón Pegar** (texto con las marcas de pegado; sin texto, Alt+V para que Claude pegue la imagen) y botón
+  **Asignar expediente**. *Nueva sesión* ofrece también los temas.
+- Los cuadros nuevos (listas, títulos, selector de carpetas) son un `dialogo.ps1` con Windows Forms que el plug-in deja
+  en `%APPDATA%\ClaudeCodePlsql`. Los expedientes y temas recientes, en `recientes.txt`.
+
 ## 1.8 (EDISA)
 
 - **Panel de sesiones.** Botón nuevo en la cinta (grupo *Sesiones*): abre una página local con todas las sesiones de

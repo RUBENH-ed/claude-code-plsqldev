@@ -15,7 +15,7 @@ public static unsafe class Exports
     private const string Description = "Claude Code para PL/SQL Developer";
 
     private const string AboutText =
-        "Claude Code para PL/SQL Developer 1.8 (EDISA)\r\n\r\n" +
+        "Claude Code para PL/SQL Developer 1.9 (EDISA)\r\n\r\n" +
         "Pasa el codigo de la ventana activa a Claude Code, abre una sesion en la terminal " +
         "y carga en el editor los cambios que haga Claude.\r\n\r\n" +
         "Si el fichero esta en una carpeta de expediente (1234567 - Titulo), Claude se abre en ella.\r\n" +
@@ -121,6 +121,8 @@ public static unsafe class Exports
                     Plugin.MenuDocs => m + "Documentación del e&xpediente",
                     Plugin.MenuInstall => m + "Preparar &instalación",
                     Plugin.MenuSessions => m + "Panel de &sesiones",
+                    Plugin.MenuOpenIn => m + "Elegir &ventana de Claude...",
+                    Plugin.MenuAssign => m + "Asi&gnar expediente...",
                     Plugin.MenuHelp => m + "A&yuda",
                     _ => "",
                 });
@@ -149,7 +151,9 @@ public static unsafe class Exports
                 Plugin.MenuInstall => "ITEM=Preparar instalación",
                 20 => "GROUP=Sesiones",
                 Plugin.MenuSessions => "LARGEITEM=Panel de sesiones",
-                22 => "GROUP=Ayuda",
+                Plugin.MenuOpenIn => "ITEM=Elegir ventana de Claude",
+                Plugin.MenuAssign => "ITEM=Asignar expediente",
+                24 => "GROUP=Ayuda",
                 Plugin.MenuHelp => "LARGEITEM=Ayuda",
                 _ => "",
             });
