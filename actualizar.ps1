@@ -1,13 +1,19 @@
 ﻿# Actualizacion automatica del plug-in "Claude Code para PL/SQL Developer" y de su paquete de skills.
 # La lanza el plug-in en segundo plano al arrancar PL/SQL Developer (y el instalador, la primera vez).
 #
-#   1. Baja la ultima version publicada (rama "publicado" del repositorio, en %APPDATA%\ClaudeCodePlsql\repo).
+#   1. Baja la ultima version publicada a %APPDATA%\ClaudeCodePlsql\repo, segun Origen en ClaudeCode.ini:
+#        git      = rama "publicado" del repositorio de GitHub (con los certificados de Windows, ver Git).
+#        <carpeta> = copia de esa rama en una carpeta compartida (de red, SharePoint u OneDrive): no hace falta Git ni
+#                   salir a Internet. La deja ahi el equipo de quien mantiene el plug-in (EspejoPublicado, abajo).
+#        ninguno  = no se baja nada; para pasar a otra version se vuelve a ejecutar instalar.ps1.
+#   1b. Solo en el equipo de quien mantiene el plug-in (EspejoPublicado=<carpeta>): deja la version en esa carpeta.
 #   2. Si la DLL ha cambiado, la deja en su sitio: la que esta cargada se renombra a .old (Windows lo permite) y la
 #      nueva se aplica al reiniciar PL/SQL Developer.
 #   2b. Deja el panel de sesiones en %APPDATA%\ClaudeCodePlsql\panel-app\<version> (y actual.txt apuntando a el).
 #   3. Pone al dia las skills elegidas al instalar en ~/.claude/skills. Nunca pisa una skill que no haya puesto el
 #      plug-in (las marca con el fichero .claudecodeplsql); si coincide el nombre, lo apunta como conflicto.
 #   4. Solo en el equipo de quien mantiene las skills (PublicarSkills=si): las copia al repositorio y las publica.
+#   5. Si CAMBIOS.md trae algo que no se habia visto, abre una ventana con las novedades (MostrarNovedades=no lo quita).
 #
 # Deja el resultado en %APPDATA%\ClaudeCodePlsql\actualizacion.json, que el plug-in lee para avisar.
 param([switch]$Instalando)
@@ -22,15 +28,35 @@ $marca = '.claudecodeplsql'
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $estado = [ordered]@{ fecha = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); version = ''; dll_nueva = $false; skills = @(); conflictos = @(); errores = @() }
 
+# Git siempre con los certificados de Windows (schannel). El cortafuegos de la empresa (FortiGate) revisa el HTTPS
+# poniendo su propio certificado, que esta en el almacen de Windows pero no en la lista propia de Git (OpenSSL): con
+# esa, Git falla con «unable to get local issuer certificate». Si Windows no puede comprobar si el certificado esta
+# revocado (pasa con algunos cortafuegos), se reintenta sin esa comprobacion.
 function Git([string[]]$a) {
     $git = (Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
     if (-not $git) { $git = Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe' }
     if (-not (Test-Path -LiteralPath $git)) { throw 'No esta instalado Git.' }
     $env:GIT_TERMINAL_PROMPT = '0'   # nunca esperar a que alguien escriba: si pide credenciales, falla
-    $salida = & $git @a 2>&1
+    $tls = @('-c', 'http.sslBackend=schannel')
+    $salida = & $git @tls @a 2>&1
+    if ($LASTEXITCODE -ne 0 -and ($salida | Out-String) -match 'revocation|revocaci|CRYPT_E_') {
+        $salida = & $git @tls -c http.schannelCheckRevoke=false @a 2>&1
+    }
     if ($LASTEXITCODE -ne 0) { throw "git $($a -join ' '): $(($salida | Out-String).Trim())" }
     return $salida
 }
+
+# Deja en $a una copia de la version publicada que hay en $de (sin .git), con VERSION la ultima: quien lea la carpeta
+# a medias ve todavia la version anterior y no la da por buena. Solo copia lo que ha cambiado (tamaño y fecha).
+function CopiarPublicado([string]$de, [string]$a) {
+    New-Item -ItemType Directory -Force -Path $a | Out-Null
+    $null = & robocopy $de $a /MIR /XD .git /XF VERSION /R:2 /W:2 /NFL /NDL /NJH /NJS /NP
+    if ($LASTEXITCODE -ge 8) { throw "No he podido copiar de $de a $a (robocopy $LASTEXITCODE)." }
+    Copy-Item -LiteralPath (Join-Path $de 'VERSION') -Destination (Join-Path $a 'VERSION') -Force
+    $global:LASTEXITCODE = 0
+}
+
+function Leer([string]$f) { if (Test-Path -LiteralPath $f) { [System.IO.File]::ReadAllText($f) } else { '' } }
 
 # Ajustes de [Actualizaciones] en ClaudeCode.ini
 function Ajuste([string]$clave, [string]$defecto = '') {
@@ -64,16 +90,47 @@ function Espejo([string]$de, [string]$a) {
 }
 
 try {
-    if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) { throw "No hay copia del repositorio en ${repo}: instala el plug-in con instalar.ps1." }
+    # De donde se baja. Las instalaciones de antes de poder elegirlo no lo tienen en el .ini: son de Git.
+    $origen = Ajuste 'Origen'
+    if (-not $origen) { $origen = if (Test-Path -LiteralPath (Join-Path $repo '.git')) { 'git' } else { 'ninguno' } }
+    if (-not (Test-Path -LiteralPath (Join-Path $repo 'VERSION')) -and $origen -eq 'ninguno') {
+        throw "No hay ninguna version en ${repo}: instala el plug-in con instalar.ps1."
+    }
+    $fVersion = Join-Path $repo 'VERSION'
+    $cambiosAntes = Leer (Join-Path $repo 'CAMBIOS.md')
 
     # Sin actualizaciones automaticas (ActualizacionesAutomaticas=no) solo se baja al instalar
     $recibir = $Instalando -or ((Ajuste 'ActualizacionesAutomaticas' 'si') -notmatch '^(no|n|false|0)$')
     if ($recibir) {
     # ------------------------------------------------------------------------ 1. ultima version publicada
-    Git @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', 'publicado') | Out-Null
-    Git @('-C', $repo, 'reset', '-q', '--hard', 'origin/publicado') | Out-Null
-    $fVersion = Join-Path $repo 'VERSION'
-    if (Test-Path -LiteralPath $fVersion) { $estado.version = ([System.IO.File]::ReadAllText($fVersion)).Trim() }
+    if ($origen -eq 'git') {
+        if (-not (Test-Path -LiteralPath (Join-Path $repo '.git'))) { throw "No hay copia del repositorio en ${repo}: vuelve a ejecutar instalar.ps1." }
+        Git @('-C', $repo, 'fetch', '-q', '--depth', '1', 'origin', 'publicado') | Out-Null
+        Git @('-C', $repo, 'reset', '-q', '--hard', 'origin/publicado') | Out-Null
+    }
+    elseif ($origen -ne 'ninguno') {
+        $fOrigen = Join-Path $origen 'VERSION'
+        if (-not (Test-Path -LiteralPath $fOrigen)) {
+            throw "No encuentro la version publicada en $origen (falta VERSION). Si es una carpeta de red, comprueba que estas en la red de la empresa o en la VPN."
+        }
+        # Se copia solo si cambia la version; si mientras se copiaba ha llegado otra, se vuelve a copiar
+        for ($i = 0; $i -lt 3 -and (Leer $fOrigen).Trim() -ne (Leer $fVersion).Trim(); $i++) { CopiarPublicado $origen $repo }
+    }
+    if (Test-Path -LiteralPath $fVersion) { $estado.version = (Leer $fVersion).Trim() }
+
+    # ------------------------------------------------------------------------ 1b. copia en la carpeta compartida
+    # Solo en el equipo de quien mantiene el plug-in, que se actualiza desde GitHub: los demas leen de esa carpeta.
+    $espejo = Ajuste 'EspejoPublicado'
+    if ($espejo -and $origen -eq 'git') {
+        try {
+            if ((Leer (Join-Path $espejo 'VERSION')).Trim() -ne $estado.version) {
+                CopiarPublicado $repo $espejo
+                $estado['espejo'] = "Version $($estado.version) copiada en $espejo"
+            }
+        } catch {
+            $estado.errores += "No he podido dejar la version en la carpeta compartida ${espejo}: $($_.Exception.Message)"
+        }
+    }
 
     # ------------------------------------------------------------------------ 2. la DLL
     $dll = Ajuste 'DllInstalada'
@@ -198,6 +255,135 @@ try {
 }
 catch {
     $estado.errores += $_.Exception.Message
+}
+
+# ============================================================================== 5. novedades
+# CAMBIOS.md por secciones («## 1.9 (EDISA)» y lo que va debajo)
+function Secciones([string]$md) {
+    $lista = New-Object System.Collections.Generic.List[object]
+    $actual = $null
+    foreach ($l in ($md -replace "`r", '') -split "`n") {
+        if ($l -match '^##\s+(.+)$') { $actual = [pscustomobject]@{ titulo = $Matches[1].Trim(); lineas = New-Object System.Collections.Generic.List[string] }; $lista.Add($actual) }
+        elseif ($actual) { $actual.lineas.Add($l) }
+    }
+    foreach ($s in $lista) { $s | Add-Member -NotePropertyName texto -NotePropertyValue (($s.lineas -join "`n").Trim()) }
+    return $lista
+}
+
+# Lo poco de Markdown que usa CAMBIOS.md: listas (con continuacion sangrada y un nivel anidado), parrafos, ###,
+# tablas, **negrita**, *cursiva*, `codigo` y [enlaces](url)
+function Enlinea([string]$t) {
+    $t = [System.Net.WebUtility]::HtmlEncode($t)
+    $t = [regex]::Replace($t, '`([^`]+)`', '<code>$1</code>')
+    $t = [regex]::Replace($t, '\*\*(.+?)\*\*', '<strong>$1</strong>')
+    $t = [regex]::Replace($t, '(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])', '<em>$1</em>')
+    $t = [regex]::Replace($t, '\[([^\]]+)\]\((https?://[^)\s]+)\)', '<a href="$2">$1</a>')
+    return $t
+}
+function Html([string]$md) {
+    $sb = New-Object System.Text.StringBuilder
+    # El estado va en $script: porque los bloques que cierran (& $cerrar) corren en su propio ambito
+    $cerrarLi = { if ($null -ne $script:li) { [void]$sb.Append('<li>' + (Enlinea $script:li) + '</li>'); $script:li = $null } }
+    $script:li = $null
+    $cerrar = {
+        & $cerrarLi
+        while ($script:niveles -gt 0) { [void]$sb.Append('</ul>'); $script:niveles-- }
+        if ($null -ne $script:parrafo) { [void]$sb.Append('<p>' + (Enlinea $script:parrafo) + '</p>'); $script:parrafo = $null }
+        if ($script:tabla) { [void]$sb.Append('</table>'); $script:tabla = $false }
+    }
+    $script:niveles = 0; $script:parrafo = $null; $script:tabla = $false
+    foreach ($l in ($md -replace "`r", '') -split "`n") {
+        if (-not $l.Trim()) { & $cerrar; continue }
+        if ($l -match '^(\s*)[-*]\s+(.*)$') {
+            $nivel = if ($Matches[1].Length -ge 2) { 2 } else { 1 }; $texto = $Matches[2]
+            if ($null -ne $script:parrafo -or $script:tabla) { & $cerrar }
+            & $cerrarLi
+            while ($script:niveles -lt $nivel) { [void]$sb.Append('<ul>'); $script:niveles++ }
+            while ($script:niveles -gt $nivel) { [void]$sb.Append('</ul>'); $script:niveles-- }
+            $script:li = $texto
+        }
+        elseif ($l -match '^###\s+(.*)$') { & $cerrar; [void]$sb.Append('<h3>' + (Enlinea $Matches[1]) + '</h3>') }
+        elseif ($l -match '^\s*\|(.*)\|\s*$') {
+            $celdas = $Matches[1] -split '\|'
+            if ($celdas -join '' -match '^[\s:-]+$') { continue }   # la linea |---|---|
+            if (-not $script:tabla) { & $cerrar; [void]$sb.Append('<table>'); $script:tabla = $true }
+            [void]$sb.Append('<tr>' + (($celdas | ForEach-Object { '<td>' + (Enlinea $_.Trim()) + '</td>' }) -join '') + '</tr>')
+        }
+        elseif ($null -ne $script:li) { $script:li += ' ' + $l.Trim() }
+        elseif ($null -ne $script:parrafo) { $script:parrafo += ' ' + $l.Trim() }
+        else { & $cerrar; $script:parrafo = $l.Trim() }
+    }
+    & $cerrar
+    return $sb.ToString()
+}
+
+function AbrirVentana([string]$fichero) {
+    $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+              "$env:LOCALAPPDATA\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    $url = ([Uri]$fichero).AbsoluteUri
+    if ($edge) { Start-Process -FilePath $edge -ArgumentList "--app=`"$url`"" } else { Start-Process -FilePath $fichero }
+}
+
+# Se compara con lo ultimo que se enseño (o, la primera vez, con lo que habia antes de esta actualizacion). En una
+# instalacion nueva no hay nada con que comparar: no se enseña nada.
+try {
+    $cambios = Leer (Join-Path $repo 'CAMBIOS.md')
+    $fVistas = Join-Path $dirPlugin 'novedades-vistas.md'
+    $base = if (Test-Path -LiteralPath $fVistas) { Leer $fVistas } else { $cambiosAntes }
+    if ($cambios -and $base -and $cambios -ne $base) {
+        $previas = @{}; foreach ($s in Secciones $base) { $previas[$s.titulo] = $s.texto }
+        $todas = @(Secciones $cambios)
+        $nuevas = @($todas | Where-Object { -not $previas.ContainsKey($_.titulo) -or $previas[$_.titulo] -ne $_.texto })
+        if ($nuevas.Count -gt 0 -and (Ajuste 'MostrarNovedades' 'si') -notmatch '^(no|n|false|0)$') {
+            $cuerpo = New-Object System.Text.StringBuilder
+            foreach ($s in $nuevas) {
+                $etiqueta = if ($previas.ContainsKey($s.titulo)) { '<span class="etq">ampliada</span>' } else { '<span class="etq">nueva</span>' }
+                [void]$cuerpo.Append("<section><h2>Versión $(Enlinea $s.titulo) $etiqueta</h2>$(Html $s.texto)</section>")
+            }
+            $anteriores = @($todas | Where-Object { $nuevas -notcontains $_ })
+            if ($anteriores.Count -gt 0) {
+                [void]$cuerpo.Append('<details><summary>Versiones anteriores</summary>')
+                foreach ($s in $anteriores) { [void]$cuerpo.Append("<section><h2>Versión $(Enlinea $s.titulo)</h2>$(Html $s.texto)</section>") }
+                [void]$cuerpo.Append('</details>')
+            }
+            $aviso = if ($estado.dll_nueva) { '<p class="aviso">Los cambios del plug-in se aplican cuando reinicies PL/SQL Developer. Las skills y el panel de sesiones ya están al día.</p>' } else { '' }
+            $html = @"
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Novedades del plug-in</title>
+<style>
+:root { --fondo:#f7f7f5; --papel:#ffffff; --texto:#1f2328; --suave:#5d646d; --linea:#e2e2de; --acento:#b5562b; --codigo:#f0efeb; }
+@media (prefers-color-scheme: dark) { :root { --fondo:#1b1c1e; --papel:#242528; --texto:#e8e6e3; --suave:#a3a7ad; --linea:#36383c; --acento:#e0895f; --codigo:#2f3034; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--fondo); color:var(--texto); font:15px/1.55 "Segoe UI", system-ui, sans-serif; }
+main { max-width:860px; margin:0 auto; padding:28px 20px 40px; }
+header h1 { font-size:22px; margin:0 0 4px; }
+header p { margin:0; color:var(--suave); }
+.aviso { margin:16px 0 0; padding:10px 14px; border-left:3px solid var(--acento); background:var(--papel); border-radius:4px; }
+section { background:var(--papel); border:1px solid var(--linea); border-radius:8px; padding:6px 22px 14px; margin-top:18px; }
+h2 { font-size:17px; margin:14px 0 8px; }
+h3 { font-size:15px; margin:14px 0 6px; }
+.etq { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--acento); border:1px solid var(--acento); border-radius:10px; padding:1px 8px; margin-left:6px; vertical-align:2px; }
+ul { padding-left:22px; margin:6px 0; } li { margin:5px 0; }
+code { font:13px Consolas, monospace; background:var(--codigo); padding:1px 5px; border-radius:4px; overflow-wrap:anywhere; }
+table { border-collapse:collapse; margin:8px 0; width:100%; } td { border:1px solid var(--linea); padding:5px 8px; vertical-align:top; }
+details { margin-top:26px; } summary { cursor:pointer; color:var(--suave); font-weight:600; }
+a { color:var(--acento); }
+</style></head>
+<body><main>
+<header><h1>Novedades de Claude Code para PL/SQL Developer</h1><p>Versión $([System.Net.WebUtility]::HtmlEncode($estado.version)) · actualizada el $(Get-Date -Format 'dd/MM/yyyy HH:mm')</p>$aviso</header>
+$($cuerpo.ToString())
+</main></body></html>
+"@
+            $fNovedades = Join-Path $dirPlugin 'novedades.html'
+            [System.IO.File]::WriteAllText($fNovedades, $html, $utf8)
+            $estado['novedades'] = $fNovedades
+            if (-not $Instalando) { AbrirVentana $fNovedades }
+        }
+    }
+    if ($cambios) { [System.IO.File]::WriteAllText($fVistas, $cambios, $utf8) }
+} catch {
+    $estado.errores += "No he podido preparar las novedades: $($_.Exception.Message)"
 }
 
 [System.IO.File]::WriteAllText($fEstado, (ConvertTo-Json -InputObject $estado -Depth 4), $utf8)

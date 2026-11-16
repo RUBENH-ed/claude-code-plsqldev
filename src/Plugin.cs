@@ -1074,10 +1074,14 @@ internal static unsafe class Plugin
             List<string> errors = Strings(root, "errores"), conflicts = Strings(root, "conflictos"), skills = Strings(root, "skills");
             foreach (string s in errors.Concat(conflicts)) Log.Info($"Actualización: {s}");
 
+            // Con novedades, actualizar.ps1 ya ha abierto su ventana (que dice lo del reinicio): basta la barra de estado
+            bool novedades = Prop(root, "novedades").Length > 0;
             if (root.TryGetProperty("dll_nueva", out var dllNueva) && dllNueva.ValueKind == System.Text.Json.JsonValueKind.True)
             {
                 Log.Info($"Actualización: versión {version} preparada.");
-                Win32.Message($"Hay una versión nueva del plug-in de Claude Code ({version}). Se aplicará cuando reinicies " +
+                if (novedades)
+                    Ide.Status($"Versión nueva del plug-in de Claude Code ({version}): se aplicará cuando reinicies PL/SQL Developer.");
+                else Win32.Message($"Hay una versión nueva del plug-in de Claude Code ({version}). Se aplicará cuando reinicies " +
                               "PL/SQL Developer.\n\nLas novedades están en CAMBIOS.md.", Win32.MB_ICONINFORMATION);
             }
             else if (skills.Count > 0)

@@ -24,6 +24,13 @@
   de cada sesión, que no se ve en la conversación.
 - **Panel: botón Pegar** (texto con las marcas de pegado; sin texto, Alt+V para que Claude pegue la imagen) y botón
   **Asignar expediente**. *Nueva sesión* ofrece también los temas.
+- **Instalar y actualizar sin Git.** El instalador se ejecuta desde la carpeta compartida de la empresa, desde el
+  ZIP de la rama `publicado` o desde la copia de Git. Pregunta de dónde se bajan las versiones nuevas: GitHub con
+  Git, una carpeta compartida (sin Git ni Internet) o ninguno. El equipo de quien mantiene el plug-in deja cada
+  versión en la carpeta compartida (`instalar.ps1 -Espejo <carpeta>`).
+- **Git con los certificados de Windows**, para que funcione con el cortafuegos de la empresa, que revisa el HTTPS.
+  Si no llega a GitHub, el instalador explica si parece el certificado, el permiso o la red.
+- **Ventana de novedades** al actualizar, con lo nuevo de este fichero (`MostrarNovedades=no` la quita).
 - Los cuadros nuevos (listas, títulos, selector de carpetas) son un `dialogo.ps1` con Windows Forms que el plug-in deja
   en `%APPDATA%\ClaudeCodePlsql`. Los expedientes y temas recientes, en `recientes.txt`.
 
