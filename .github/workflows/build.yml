@@ -56,7 +56,7 @@ jobs:
     env:
       # main -> publicado (todos); pruebas/... -> publicado-pruebas (solo quien instala con -Pruebas)
       DESTINO: ${{ github.ref == 'refs/heads/main' && 'publicado' || 'publicado-pruebas' }}
-      SUFIJO: ${{ github.ref == 'refs/heads/main' && '' || format(' pruebas {0}', github.ref_name) }}
+      SUFIJO: ${{ github.ref != 'refs/heads/main' && format(' pruebas {0}', github.ref_name) || '' }}
     steps:
       - uses: actions/checkout@v4
 
