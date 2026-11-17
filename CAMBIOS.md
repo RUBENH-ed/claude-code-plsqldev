@@ -29,7 +29,9 @@
   o la red. Si no está la copia de Git (por ejemplo, ejecutado desde el ZIP de la rama `publicado`), la hace él.
 - **Versión de pruebas**: las ramas `pruebas/...` se publican en `publicado-pruebas`, y `instalar.ps1 -Pruebas` la
   instala y se actualiza con ella (`-Estable` vuelve a la de todos).
-- **Ventana de novedades** al actualizar, con lo nuevo de este fichero (`MostrarNovedades=no` la quita).
+- **Ventana de novedades**, con lo nuevo de este fichero: sale una sola vez, la primera vez que arranca PL/SQL Developer
+  después de la actualización (ya con la versión nueva), y siempre detrás de la ayuda de cómo se usa el plug-in si
+  también toca. Después está en *Acerca de* del plug-in (configuración de plug-ins). `MostrarNovedades=no` la quita.
 - Los cuadros nuevos (listas, títulos, selector de carpetas) son un `dialogo.ps1` con Windows Forms que el plug-in deja
   en `%APPDATA%\ClaudeCodePlsql`. Los expedientes y temas recientes, en `recientes.txt`.
 

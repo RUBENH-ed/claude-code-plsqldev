@@ -10,7 +10,8 @@
 #   3. Pone al dia las skills elegidas al instalar en ~/.claude/skills. Nunca pisa una skill que no haya puesto el
 #      plug-in (las marca con el fichero .claudecodeplsql); si coincide el nombre, lo apunta como conflicto.
 #   4. Solo en el equipo de quien mantiene las skills (PublicarSkills=si): las copia al repositorio y las publica.
-#   5. Si CAMBIOS.md trae algo que no se habia visto, abre una ventana con las novedades (MostrarNovedades=no lo quita).
+#   5. Prepara la ventana de novedades (novedades.html) con lo que CAMBIOS.md traiga sin ver. No la abre: la abre el
+#      plug-in la primera vez que arranca despues de la actualizacion, tras su ayuda (MostrarNovedades=no lo quita).
 #
 # Deja el resultado en %APPDATA%\ClaudeCodePlsql\actualizacion.json, que el plug-in lee para avisar.
 param([switch]$Instalando)
@@ -276,24 +277,23 @@ function Html([string]$md) {
     return $sb.ToString()
 }
 
-function AbrirVentana([string]$fichero) {
-    $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
-              "$env:LOCALAPPDATA\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    $url = ([Uri]$fichero).AbsoluteUri
-    if ($edge) { Start-Process -FilePath $edge -ArgumentList "--app=`"$url`"" } else { Start-Process -FilePath $fichero }
-}
-
-# Se compara con lo ultimo que se enseño (o, la primera vez, con lo que habia antes de esta actualizacion). En una
-# instalacion nueva no hay nada con que comparar: no se enseña nada.
+# Las secciones de CAMBIOS.md que no se habian visto (comparando con lo ultimo que se enseño o, la primera vez, con lo
+# que habia antes de esta actualizacion). Aqui no se abre nada: el plug-in las enseña una vez, la primera vez que
+# arranca PL/SQL Developer despues de esta actualizacion (ya con la DLL nueva) y detras de su ayuda. novedades.html
+# queda siempre, con todas las versiones, para «Acerca de». En una instalacion nueva no hay nada con que comparar.
 try {
     $cambios = Leer (Join-Path $repo 'CAMBIOS.md')
     $fVistas = Join-Path $dirPlugin 'novedades-vistas.md'
-    $base = if (Test-Path -LiteralPath $fVistas) { Leer $fVistas } else { $cambiosAntes }
-    if ($cambios -and $base -and $cambios -ne $base) {
-        $previas = @{}; foreach ($s in Secciones $base) { $previas[$s.titulo] = $s.texto }
+    $fPendientes = Join-Path $dirPlugin 'novedades-pendientes.txt'
+    $fBase = Join-Path $dirPlugin 'novedades-base.md'
+    $fNovedades = Join-Path $dirPlugin 'novedades.html'
+    # Si aun no se han enseñado las de una actualizacion anterior, se enseñan juntas con estas
+    $base = if ((Test-Path -LiteralPath $fPendientes) -and (Test-Path -LiteralPath $fBase)) { Leer $fBase } elseif (Test-Path -LiteralPath $fVistas) { Leer $fVistas } else { $cambiosAntes }
+    if ($cambios) {
+        $previas = @{}; if ($base) { foreach ($s in Secciones $base) { $previas[$s.titulo] = $s.texto } }
         $todas = @(Secciones $cambios)
-        $nuevas = @($todas | Where-Object { -not $previas.ContainsKey($_.titulo) -or $previas[$_.titulo] -ne $_.texto })
-        if ($nuevas.Count -gt 0 -and (Ajuste 'MostrarNovedades' 'si') -notmatch '^(no|n|false|0)$') {
+        $nuevas = @(if ($base -and $cambios -ne $base) { $todas | Where-Object { -not $previas.ContainsKey($_.titulo) -or $previas[$_.titulo] -ne $_.texto } })
+        if ($nuevas.Count -gt 0 -or -not (Test-Path -LiteralPath $fNovedades)) {
             $cuerpo = New-Object System.Text.StringBuilder
             foreach ($s in $nuevas) {
                 $etiqueta = if ($previas.ContainsKey($s.titulo)) { '<span class="etq">ampliada</span>' } else { '<span class="etq">nueva</span>' }
@@ -301,11 +301,12 @@ try {
             }
             $anteriores = @($todas | Where-Object { $nuevas -notcontains $_ })
             if ($anteriores.Count -gt 0) {
-                [void]$cuerpo.Append('<details><summary>Versiones anteriores</summary>')
+                # Con novedades, las demas versiones plegadas; sin ellas (para «Acerca de»), todas a la vista
+                if ($nuevas.Count -gt 0) { [void]$cuerpo.Append('<details><summary>Versiones anteriores</summary>') }
                 foreach ($s in $anteriores) { [void]$cuerpo.Append("<section><h2>Versión $(Enlinea $s.titulo)</h2>$(Html $s.texto)</section>") }
-                [void]$cuerpo.Append('</details>')
+                if ($nuevas.Count -gt 0) { [void]$cuerpo.Append('</details>') }
             }
-            $aviso = if ($estado.dll_nueva) { '<p class="aviso">Los cambios del plug-in se aplican cuando reinicies PL/SQL Developer. Las skills y el panel de sesiones ya están al día.</p>' } else { '' }
+            $aviso = ''
             $html = @"
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -334,10 +335,13 @@ a { color:var(--acento); }
 $($cuerpo.ToString())
 </main></body></html>
 "@
-            $fNovedades = Join-Path $dirPlugin 'novedades.html'
             [System.IO.File]::WriteAllText($fNovedades, $html, $utf8)
             $estado['novedades'] = $fNovedades
-            if (-not $Instalando) { AbrirVentana $fNovedades }
+            if ($nuevas.Count -gt 0 -and (Ajuste 'MostrarNovedades' 'si') -notmatch '^(no|n|false|0)$') {
+                # Pendientes para el proximo arranque; se guarda con que se comparo por si llega otra antes de verlas
+                if (-not (Test-Path -LiteralPath $fPendientes)) { [System.IO.File]::WriteAllText($fBase, [string]$base, $utf8) }
+                [System.IO.File]::WriteAllText($fPendientes, $estado.version, $utf8)
+            }
         }
     }
     if ($cambios) { [System.IO.File]::WriteAllText($fVistas, $cambios, $utf8) }

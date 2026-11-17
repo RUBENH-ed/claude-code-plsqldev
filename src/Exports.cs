@@ -186,7 +186,12 @@ public static unsafe class Exports
     }
 
     [UnmanagedCallersOnly(EntryPoint = "About", CallConvs = new[] { typeof(CallConvCdecl) })]
-    public static nint About() => HostString(AboutText);
+    public static nint About()
+    {
+        // Diálogo propio (con la opción de ver las novedades); con "" PL/SQL Developer no enseña el suyo
+        Guard(() => Help.About(AboutText));
+        return HostString("");
+    }
 
     [UnmanagedCallersOnly(EntryPoint = "Configure", CallConvs = new[] { typeof(CallConvCdecl) })]
     public static void Configure() => Guard(Plugin.OpenConfig);

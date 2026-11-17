@@ -255,11 +255,10 @@ Write-Host '  Abre (o reinicia) PL/SQL Developer: tendras la pestaña Claude Cod
 Write-Host '  Con Node.js instalado, el boton Panel de sesiones te enseña todas las sesiones de Claude abiertas, en directo.'
 if ($recibir -eq 'si') {
     Write-Host '  A partir de ahora, cada vez que arranque PL/SQL Developer se bajan solas de GitHub las versiones nuevas del'
-    Write-Host '  plug-in y de las skills elegidas; la DLL nueva se aplica al reiniciarlo. Con cada version nueva se abre una'
-    Write-Host '  ventana con sus novedades.'
+    Write-Host '  plug-in y de las skills elegidas; la DLL nueva se aplica al reiniciarlo, y entonces se abre una ventana con'
+    Write-Host '  sus novedades (despues de la de ayuda, si tambien toca).'
 } else {
     Write-Host '  Sin actualizaciones automaticas: para pasar a una version nueva, vuelve a ejecutar este script.'
 }
 Write-Host '  Para cambiar lo elegido, vuelve a ejecutar este script.'
-# Al cambiar de version con el instalador tambien se ven las novedades
-if ($estado.novedades -and (Test-Path -LiteralPath $estado.novedades)) { Start-Process -FilePath $estado.novedades }
+Write-Host '  Las novedades de cada version estan siempre en Configurar plug-ins > Claude Code > Acerca de.'

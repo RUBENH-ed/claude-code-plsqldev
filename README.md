@@ -178,8 +178,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:APPDATA\ClaudeCodePlsq
 Con `-Estable` se vuelve a la versión de todos. Queda en `Rama` de `ClaudeCode.ini`.
 
 **Ventana de novedades.** Cuando una actualización trae algo nuevo en `CAMBIOS.md`, se abre una ventana con esas
-novedades (y las versiones anteriores, plegadas). Queda en `%APPDATA%\ClaudeCodePlsql\novedades.html`.
-`MostrarNovedades=no` en `ClaudeCode.ini` la quita.
+novedades (y las versiones anteriores, plegadas) una sola vez: la primera vez que arranca PL/SQL Developer después de
+la actualización, ya con la versión nueva. Si también toca la ayuda, sale primero la ayuda y, al cerrarla, las
+novedades. Después siguen en *Acerca de* del plug-in (configuración de plug-ins) y en
+`%APPDATA%\ClaudeCodePlsql\novedades.html`. `MostrarNovedades=no` en `ClaudeCode.ini` la quita.
 
 **Git y el cortafuegos de la empresa.** El cortafuegos (FortiGate) revisa el HTTPS con su propio certificado, que
 Windows conoce pero la lista propia de Git no. Por eso `instalar.ps1` y `actualizar.ps1` usan Git siempre con los
