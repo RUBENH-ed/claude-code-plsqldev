@@ -1,5 +1,15 @@
 # Cambios
 
+## 2.0 (EDISA, en pruebas)
+
+- **Claude dentro del IDE** (prototipo; cinta, grupo *Sesiones*): el panel de sesiones dentro de la ventana de PL/SQL
+  Developer, a la derecha de los editores, que se estrechan para dejarle sitio. Su borde izquierdo se arrastra para
+  cambiar el ancho, y el mismo botón lo oculta. Mientras está a la vista, las sesiones nuevas de Claude se abren en él,
+  sin ventana de Windows Terminal. Usa WebView2, el componente de Edge que trae el propio PL/SQL Developer, y necesita
+  el panel de sesiones (Node.js). `PanelIntegrado=si` lo abre al arrancar y `AnchoPanelIntegrado` fija su ancho
+  inicial (sección `[Panel]`). No es un panel acoplable como los del IDE (el interface de plug-ins no lo permite): se
+  hace con funciones de Windows, y una versión nueva de PL/SQL Developer podría dejarlo sin sitio.
+
 ## 1.9 (EDISA)
 
 - **Temas: abrir algo que no es un expediente con un título.** Cuando la ventana no es de ningún expediente (desde la

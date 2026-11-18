@@ -28,7 +28,7 @@ internal static unsafe class Plugin
     public const int MenuOpen = 3, MenuAskSelection = 4, MenuPull = 5, MenuCopyRef = 6, MenuFolder = 8, MenuConfig = 9,
         MenuConnect = 11, MenuDisconnect = 12, MenuSetDev = 13,
         MenuCompare = 15, MenuReview = 16, MenuExplainError = 17, MenuDocs = 18, MenuInstall = 19,
-        MenuSessions = 21, MenuOpenIn = 22, MenuAssign = 23, MenuHelp = 25;
+        MenuSessions = 21, MenuOpenIn = 22, MenuAssign = 23, MenuEmbedded = 24, MenuHelp = 26;
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly Dictionary<int, Link> Links = new();
@@ -77,6 +77,7 @@ internal static unsafe class Plugin
 
     public static void Deactivate()
     {
+        Embedded.Destroy();
         if (_timer != 0)
         {
             Win32.KillTimer(0, _timer);
@@ -111,6 +112,7 @@ internal static unsafe class Plugin
                 case MenuSessions: Panel.Open(); break;
                 case MenuOpenIn: OpenInSession(); break;
                 case MenuAssign: AssignProject(null); break;
+                case MenuEmbedded: Embedded.Toggle(); break;
                 case MenuHelp: Help.Open(); break;
             }
         }
@@ -1228,6 +1230,15 @@ internal static unsafe class Plugin
         return list;
     }
 
+    private static int _ticks;
+
+    /// <summary>Panel integrado: con PanelIntegrado=si se abre solo, cuando el IDE ya ha colocado su ventana.</summary>
+    private static void EmbeddedTick()
+    {
+        if (++_ticks == 3 && Config.EmbeddedAtStart && !Embedded.Visible && Ide.MainWindow != 0) Embedded.Toggle();
+        Embedded.Tick();
+    }
+
     /// <summary>Temporizador en el hilo principal del IDE: detecta cuándo Claude ha cambiado el fichero de la ventana activa.</summary>
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static void OnTimer(nint hwnd, uint msg, nuint id, uint time)
@@ -1238,6 +1249,7 @@ internal static unsafe class Plugin
         {
             CheckUpdate();
             Help.OpenIfPending();
+            EmbeddedTick();
             CheckRequests();
             PlacePending();
             CheckActiveWindow();
@@ -1339,7 +1351,8 @@ internal static unsafe class Plugin
             Win32.Message($"No se puede abrir la sesión en el panel: {Panel.LastProblem}", Win32.MB_ICONWARNING);
             return false;
         }
-        bool hidden = panel != null && (onlyInPanel || Panel.HideWindows());
+        // Con el panel integrado a la vista, las sesiones nuevas se abren en él, sin ventana aparte
+        bool hidden = panel != null && (onlyInPanel || Panel.HideWindows() || Embedded.Visible);
 
         if (Config.SidePanel && !hidden && !forceNew)
         {

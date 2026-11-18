@@ -72,6 +72,13 @@ RutaNode=
 ; Carpeta del panel (vacío = la que deja la actualización automática en %APPDATA%\ClaudeCodePlsql\panel-app)
 RutaPanel=
 
+; Panel integrado (prueba): el panel de sesiones dentro de la ventana de PL/SQL Developer, a la derecha de los
+; editores (botón «Claude dentro del IDE»). si = se abre solo al arrancar. Su borde izquierdo se arrastra.
+PanelIntegrado=no
+
+; Ancho inicial del panel integrado, en % de la zona de editores (20-70)
+AnchoPanelIntegrado=35
+
 [MCP]
 ; Ruta a sql.exe de SQLcl 25.2 o superior para que Claude pueda consultar la base de datos. Si la rellenas, el
 ; plug-in se la pasa a Claude Code con --mcp-config (%APPDATA%\ClaudeCodePlsql\mcp-sqlcl.json), sin dejar nada en
@@ -1220,6 +1227,9 @@ export const register: Register = on => {
         // Carpeta con una etiqueta: la conversación pasa a un expediente
         (Plugin.MenuAssign, "Asignar expediente",
             Svg("""<path d="M2.5 6v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H10L8.5 5h-5a1 1 0 0 0-1 1z" fill="none" stroke="#434A54"/><path d="M10.5 9.5v5M8 12h5" stroke="#27AE60" stroke-width="1.6" stroke-linecap="round"/>""")),
+        // La ventana del IDE con el panel de Claude (naranja) a la derecha
+        (Plugin.MenuEmbedded, "Claude dentro del IDE",
+            Svg("""<rect x="1.5" y="3.5" width="18" height="14" rx="1.5" fill="none" stroke="#434A54" stroke-width="1.3"/><path d="M1.5 6.5h18" stroke="#434A54"/><rect x="12" y="7.5" width="6.5" height="9" fill="#D97757"/>""")),
         (Plugin.MenuHelp, "Ayuda",
             Svg("""<circle cx="10.5" cy="10.5" r="7.5" fill="none" stroke="#434A54" stroke-width="1.4"/><path d="M8.2 8.2a2.3 2.3 0 1 1 3.3 2.1c-.6.3-1 .8-1 1.4v.5" fill="none" stroke="#2F80ED" stroke-width="1.6" stroke-linecap="round"/><circle cx="10.5" cy="14.6" r="1" fill="#2F80ED"/>""")),
         (Plugin.MenuInstall, "Preparar instalación",

@@ -123,6 +123,7 @@ public static unsafe class Exports
                     Plugin.MenuSessions => m + "Panel de &sesiones",
                     Plugin.MenuOpenIn => m + "Elegir &ventana de Claude...",
                     Plugin.MenuAssign => m + "Asi&gnar expediente...",
+                    Plugin.MenuEmbedded => m + "Claude &dentro del IDE",
                     Plugin.MenuHelp => m + "A&yuda",
                     _ => "",
                 });
@@ -153,7 +154,8 @@ public static unsafe class Exports
                 Plugin.MenuSessions => "LARGEITEM=Panel de sesiones",
                 Plugin.MenuOpenIn => "ITEM=Elegir ventana de Claude",
                 Plugin.MenuAssign => "ITEM=Asignar expediente",
-                24 => "GROUP=Ayuda",
+                Plugin.MenuEmbedded => "ITEM=Claude dentro del IDE",
+                25 => "GROUP=Ayuda",
                 Plugin.MenuHelp => "LARGEITEM=Ayuda",
                 _ => "",
             });

@@ -33,6 +33,8 @@ internal static class Config
     public static string PanelMode = "auto";       // PanelSesiones: auto (si hay Node.js y panel) | si | no
     public static string NodePath = "";            // RutaNode: node.exe (vacío = el del PATH o el de Program Files)
     public static string PanelPath = "";           // RutaPanel: carpeta del panel (vacío = la que instala actualizar.ps1)
+    public static bool EmbeddedAtStart = false;    // PanelIntegrado: abrir el panel dentro del IDE al arrancar
+    public static int EmbeddedPercent = 35;        // AnchoPanelIntegrado: % de la zona de editores para el panel (20-70)
 
     /// <summary>Último expediente usado (estado.ini). Se ofrece para las ventanas que no son de un fichero de expediente.</summary>
     public static string LastProject = "";
@@ -77,6 +79,8 @@ internal static class Config
                     case "panelsesiones": PanelMode = Choice(value.Replace("í", "i"), "auto", "auto", "si", "no"); break;
                     case "rutanode": NodePath = value.Trim('"'); break;
                     case "rutapanel": PanelPath = value.Trim('"').TrimEnd('\\', '/'); break;
+                    case "panelintegrado": EmbeddedAtStart = YesNo(value, false); break;
+                    case "anchopanelintegrado": if (int.TryParse(value.TrimEnd('%'), out int ep)) EmbeddedPercent = Math.Clamp(ep, 20, 70); break;
                 }
             }
         }

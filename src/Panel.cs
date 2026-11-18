@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace ClaudeCodePlsql;
@@ -278,6 +279,15 @@ internal static class Panel
     }
 
     /// <summary>Enseña una sesión en el panel (en el que ya esté abierto o en uno nuevo), sin esperar.</summary>
+    /// <summary>Enlace de entrada al panel (de un solo uso, 2 minutos), para el panel integrado en el IDE.</summary>
+    public static string? EntryUrl((string Node, string Dir) panel, out string error)
+    {
+        var (exit, output, err) = Run(panel.Node, $"{Arg(Path.Combine(panel.Dir, "abrir.js"))} --imprimir", panel.Dir, 30_000);
+        string url = output.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith("http://127.0.0.1:")) ?? "";
+        error = url.Length > 0 ? "" : (err.Length > 0 ? err : $"abrir.js ha terminado con el código {exit} sin dar el enlace.");
+        return url.Length > 0 ? url : null;
+    }
+
     public static void Show((string Node, string Dir) panel, string id)
     {
         try
