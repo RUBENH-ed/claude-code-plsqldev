@@ -1,0 +1,24 @@
+{
+  "name": "panel-sesiones-claude",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Panel de sesiones de Claude Code abiertas desde el plug-in de PL/SQL Developer: lista, terminal en directo y estado de cada una.",
+  "type": "commonjs",
+  "main": "servidor.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "servidor": "node servidor.js",
+    "prueba": "node pruebas/prueba.js"
+  },
+  "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.18",
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/addon-web-links": "0.12.0",
+    "@xterm/headless": "6.0.0",
+    "@xterm/xterm": "6.0.0",
+    "ws": "8.22.0"
+  }
+}
